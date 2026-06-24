@@ -41,6 +41,23 @@
     background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.25);
     font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center;
   }
+  .export-btn {
+    position: fixed; bottom: 216px; right: 16px; z-index: 1000;
+    width: 48px; height: 48px; border-radius: 50%; border: none;
+    background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+
+  /* 내보내기 시트 */
+  .export-option {
+    display: flex; align-items: center; gap: 14px;
+    padding: 16px 0; border-bottom: 1px solid #eee; cursor: pointer;
+  }
+  .export-option:last-child { border-bottom: none; }
+  .export-option .icon { font-size: 26px; width: 36px; text-align: center; flex-shrink: 0; }
+  .export-option .label { font-size: 15px; font-weight: 600; }
+  .export-option .desc { font-size: 12px; color: #888; margin-top: 2px; }
+  .export-option:active { background: #f5f5f5; border-radius: 8px; }
 
   /* 모달(등록 폼 / 목록) */
   .overlay {
@@ -102,6 +119,7 @@
 
 <div id="map"></div>
 
+<button class="export-btn" onclick="openExport()" title="내보내기">📤</button>
 <button class="list-btn" onclick="openList()" title="목록">📋</button>
 <button class="locate-btn" onclick="locateMe()" title="내 위치">📍</button>
 <button class="fab" onclick="openForm()">+ 조사 등록</button>
@@ -153,6 +171,50 @@
     <div id="listBody"></div>
     <div class="row-btns">
       <button class="btn-cancel" onclick="closeList()">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 내보내기 -->
+<div class="overlay" id="exportOverlay">
+  <div class="sheet">
+    <h2>데이터 내보내기</h2>
+
+    <div class="export-option" onclick="exportCSV()">
+      <div class="icon">📊</div>
+      <div>
+        <div class="label">CSV 다운로드</div>
+        <div class="desc">좌표·종류·메모를 엑셀에서 열 수 있는 CSV 파일로 저장</div>
+      </div>
+    </div>
+
+    <div class="export-option" onclick="exportPhotosZip()">
+      <div class="icon">🖼️</div>
+      <div>
+        <div class="label">사진 ZIP 다운로드</div>
+        <div class="desc">등록된 사진 전체를 ZIP 파일로 묶어 저장</div>
+      </div>
+    </div>
+
+    <div class="export-option" onclick="exportJSON()">
+      <div class="icon">💾</div>
+      <div>
+        <div class="label">전체 백업 (JSON)</div>
+        <div class="desc">모든 데이터를 JSON 파일로 내보내기 (사진 포함)</div>
+      </div>
+    </div>
+
+    <div class="export-option" onclick="document.getElementById('importInput').click()">
+      <div class="icon">📥</div>
+      <div>
+        <div class="label">백업 복원 (JSON)</div>
+        <div class="desc">이전에 백업한 JSON 파일을 불러와 복원</div>
+      </div>
+    </div>
+    <input type="file" id="importInput" accept=".json" style="display:none" onchange="importJSON(event)">
+
+    <div class="row-btns" style="margin-top:16px">
+      <button class="btn-cancel" onclick="closeExport()">닫기</button>
     </div>
   </div>
 </div>
@@ -328,6 +390,83 @@ async function removeItem(id) {
   await deleteRecord(id);
   await loadMarkers();
   openList();
+}
+
+// ---------- 내보내기 ----------
+function openExport() { document.getElementById('exportOverlay').classList.add('show'); }
+function closeExport() { document.getElementById('exportOverlay').classList.remove('show'); }
+
+async function exportCSV() {
+  const all = (await getAll()).sort((a, b) => a.time - b.time);
+  if (!all.length) { alert('등록된 데이터가 없습니다.'); return; }
+  const header = ['id', '시각', '위도', '경도', '종류', '메모'];
+  const rows = all.map(r => [
+    r.id,
+    new Date(r.time).toLocaleString('ko-KR'),
+    r.lat,
+    r.lng,
+    r.kind,
+    '"' + (r.memo || '').replace(/"/g, '""') + '"'
+  ]);
+  const csv = '﻿' + [header, ...rows].map(r => r.join(',')).join('\r\n');
+  downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), '현장조사_' + dateTag() + '.csv');
+}
+
+async function exportJSON() {
+  const all = await getAll();
+  if (!all.length) { alert('등록된 데이터가 없습니다.'); return; }
+  const json = JSON.stringify(all, null, 2);
+  downloadBlob(new Blob([json], { type: 'application/json' }), '현장조사_백업_' + dateTag() + '.json');
+}
+
+async function importJSON(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  e.target.value = '';
+  const text = await file.text();
+  let records;
+  try { records = JSON.parse(text); } catch { alert('JSON 파일을 읽을 수 없습니다.'); return; }
+  if (!Array.isArray(records)) { alert('올바른 백업 파일이 아닙니다.'); return; }
+  if (!confirm(`${records.length}건을 복원합니다. 기존 데이터에 추가(덮어쓰기)됩니다. 계속할까요?`)) return;
+  for (const r of records) await putRecord(r);
+  await loadMarkers();
+  alert(`${records.length}건 복원 완료.`);
+  closeExport();
+}
+
+async function exportPhotosZip() {
+  const all = await getAll();
+  const withPhoto = all.filter(r => r.photo);
+  if (!withPhoto.length) { alert('저장된 사진이 없습니다.'); return; }
+  // JSZip 지연 로드
+  if (!window.JSZip) {
+    await new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = 'https://unpkg.com/jszip/dist/jszip.min.js';
+      s.onload = res; s.onerror = rej;
+      document.head.appendChild(s);
+    });
+  }
+  const zip = new JSZip();
+  withPhoto.forEach((r, i) => {
+    const base64 = r.photo.split(',')[1];
+    const dt = new Date(r.time).toISOString().slice(0, 10);
+    zip.file(`${String(i + 1).padStart(3, '0')}_${dt}_${r.kind}.jpg`, base64, { base64: true });
+  });
+  const blob = await zip.generateAsync({ type: 'blob' });
+  downloadBlob(blob, '현장조사_사진_' + dateTag() + '.zip');
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+}
+
+function dateTag() {
+  return new Date().toISOString().slice(0, 10).replace(/-/g, '');
 }
 
 // ---------- 시작 ----------
