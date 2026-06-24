@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>현장조사</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { font-family: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; color: #1a1a1a; }
+  #map { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 1; }
+
+  /* 상단 바 */
+  .topbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+    background: rgba(255,255,255,0.95); backdrop-filter: blur(6px);
+    padding: 12px 16px; display: flex; justify-content: space-between; align-items: center;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+  }
+  .topbar h1 { font-size: 16px; font-weight: 700; }
+  .topbar .count { font-size: 13px; color: #666; }
+
+  /* 하단 버튼 */
+  .fab {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    z-index: 1000; background: #1565c0; color: #fff; border: none;
+    padding: 16px 28px; border-radius: 30px; font-size: 16px; font-weight: 700;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3); cursor: pointer;
+  }
+  .fab:active { background: #0d47a1; }
+
+  .locate-btn {
+    position: fixed; bottom: 100px; right: 16px; z-index: 1000;
+    width: 48px; height: 48px; border-radius: 50%; border: none;
+    background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    font-size: 22px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+  .list-btn {
+    position: fixed; bottom: 158px; right: 16px; z-index: 1000;
+    width: 48px; height: 48px; border-radius: 50%; border: none;
+    background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+
+  /* 모달(등록 폼 / 목록) */
+  .overlay {
+    position: fixed; inset: 0; z-index: 2000; background: rgba(0,0,0,0.5);
+    display: none; align-items: flex-end;
+  }
+  .overlay.show { display: flex; }
+  .sheet {
+    background: #fff; width: 100%; max-height: 88vh; overflow-y: auto;
+    border-radius: 20px 20px 0 0; padding: 20px 18px 32px;
+  }
+  .sheet h2 { font-size: 18px; margin-bottom: 16px; }
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 6px; color: #333; }
+  .field input[type=text], .field textarea, .field select {
+    width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 10px;
+    font-size: 15px; font-family: inherit;
+  }
+  .field textarea { resize: vertical; min-height: 70px; }
+
+  .photo-btn {
+    display: block; width: 100%; padding: 14px; border: 2px dashed #1565c0;
+    border-radius: 10px; background: #f5f9ff; color: #1565c0; font-size: 15px;
+    font-weight: 600; text-align: center; cursor: pointer;
+  }
+  .photo-btn input { display: none; }
+  .preview { margin-top: 10px; }
+  .preview img { width: 100%; border-radius: 10px; display: block; }
+
+  .meta { font-size: 12px; color: #888; margin-top: 6px; line-height: 1.6; }
+
+  .row-btns { display: flex; gap: 10px; margin-top: 8px; }
+  .btn-primary, .btn-cancel {
+    flex: 1; padding: 14px; border: none; border-radius: 10px; font-size: 15px;
+    font-weight: 700; cursor: pointer;
+  }
+  .btn-primary { background: #1565c0; color: #fff; }
+  .btn-cancel { background: #eee; color: #444; }
+
+  /* 목록 항목 */
+  .list-item {
+    display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid #eee;
+    cursor: pointer; align-items: center;
+  }
+  .list-item img { width: 60px; height: 60px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background:#eee; }
+  .list-item .info { flex: 1; min-width: 0; }
+  .list-item .info .t { font-weight: 700; font-size: 15px; }
+  .list-item .info .s { font-size: 12px; color: #888; margin-top: 3px; }
+  .list-item .del { color: #d32f2f; font-size: 13px; padding: 6px; }
+  .empty { text-align: center; color: #999; padding: 40px 0; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>현장조사</h1>
+  <span class="count" id="count">조사: 0건</span>
+</div>
+
+<div id="map"></div>
+
+<button class="list-btn" onclick="openList()" title="목록">📋</button>
+<button class="locate-btn" onclick="locateMe()" title="내 위치">📍</button>
+<button class="fab" onclick="openForm()">+ 조사 등록</button>
+
+<!-- 등록 폼 -->
+<div class="overlay" id="formOverlay">
+  <div class="sheet">
+    <h2>조사 등록</h2>
+
+    <div class="field">
+      <label>사진</label>
+      <label class="photo-btn">
+        📷 사진 촬영 / 선택
+        <input type="file" id="photoInput" accept="image/*" capture="environment">
+      </label>
+      <div class="preview" id="preview"></div>
+    </div>
+
+    <div class="field">
+      <label>종류</label>
+      <select id="kindInput">
+        <option value="하천">하천</option>
+        <option value="소하천">소하천</option>
+        <option value="댐지점">댐지점</option>
+        <option value="구조물">구조물</option>
+        <option value="불법시설물">불법시설물</option>
+        <option value="기타">기타</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label>메모 (특이사항)</label>
+      <textarea id="memoInput" placeholder="예: 호안 일부 유실, 토사 퇴적 등"></textarea>
+    </div>
+
+    <div class="meta" id="formMeta">위치/시각은 등록 시 자동 기록됩니다.</div>
+
+    <div class="row-btns">
+      <button class="btn-cancel" onclick="closeForm()">취소</button>
+      <button class="btn-primary" onclick="saveRecord()">등록</button>
+    </div>
+  </div>
+</div>
+
+<!-- 목록 -->
+<div class="overlay" id="listOverlay">
+  <div class="sheet">
+    <h2>조사 목록</h2>
+    <div id="listBody"></div>
+    <div class="row-btns">
+      <button class="btn-cancel" onclick="closeList()">닫기</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ---------- 지도 초기화 ----------
+const map = L.map('map', { zoomControl: false }).setView([36.5, 127.8], 7); // 대한민국 중심
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '© OpenStreetMap'
+}).addTo(map);
+L.control.zoom({ position: 'topright' }).addTo(map);
+
+let myMarker = null;       // 내 위치 마커
+let currentPos = null;     // 현재 GPS 좌표 {lat, lng}
+let currentPhoto = null;   // 등록 폼에서 선택한 사진 (dataURL)
+
+// ---------- IndexedDB ----------
+let db;
+const DB_NAME = 'fieldSurveyDB';
+const STORE = 'records';
+
+function initDB() {
+  const req = indexedDB.open(DB_NAME, 1);
+  req.onupgradeneeded = e => {
+    e.target.result.createObjectStore(STORE, { keyPath: 'id' });
+  };
+  req.onsuccess = e => { db = e.target.result; loadMarkers(); };
+  req.onerror = () => alert('저장소를 열 수 없습니다.');
+}
+
+function getAll() {
+  return new Promise((res) => {
+    const tx = db.transaction(STORE, 'readonly').objectStore(STORE).getAll();
+    tx.onsuccess = () => res(tx.result || []);
+  });
+}
+function putRecord(rec) {
+  return new Promise((res) => {
+    const tx = db.transaction(STORE, 'readwrite').objectStore(STORE).put(rec);
+    tx.onsuccess = () => res();
+  });
+}
+function deleteRecord(id) {
+  return new Promise((res) => {
+    const tx = db.transaction(STORE, 'readwrite').objectStore(STORE).delete(id);
+    tx.onsuccess = () => res();
+  });
+}
+
+// ---------- 마커 표시 ----------
+let recordMarkers = [];
+async function loadMarkers() {
+  recordMarkers.forEach(m => map.removeLayer(m));
+  recordMarkers = [];
+  const all = await getAll();
+  document.getElementById('count').textContent = '조사: ' + all.length + '건';
+  all.forEach(r => {
+    const m = L.circleMarker([r.lat, r.lng], {
+      radius: 9, color: '#2e7d32', fillColor: '#43a047', fillOpacity: 0.9, weight: 2
+    }).addTo(map);
+    const when = new Date(r.time).toLocaleString('ko-KR');
+    const img = r.photo ? `<img src="${r.photo}" style="width:160px;border-radius:6px;display:block;margin-top:6px;">` : '';
+    m.bindPopup(`<b>${r.kind}</b><br>${r.memo || '(메모 없음)'}<br><small>${when}</small>${img}`);
+    recordMarkers.push(m);
+  });
+}
+
+// ---------- 내 위치 ----------
+function locateMe() {
+  if (!navigator.geolocation) { alert('이 기기는 위치를 지원하지 않습니다.'); return; }
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      currentPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      map.setView([currentPos.lat, currentPos.lng], 17);
+      if (myMarker) map.removeLayer(myMarker);
+      myMarker = L.marker([currentPos.lat, currentPos.lng]).addTo(map).bindPopup('내 위치');
+    },
+    err => alert('위치를 가져올 수 없습니다.\n(GPS·위치권한을 확인하세요)\n' + err.message),
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+}
+
+// ---------- 등록 폼 ----------
+function openForm() {
+  currentPhoto = null;
+  document.getElementById('preview').innerHTML = '';
+  document.getElementById('memoInput').value = '';
+  document.getElementById('kindInput').value = '하천';
+  // 폼 열 때 현재 위치 갱신
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        currentPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        document.getElementById('formMeta').textContent =
+          `현재 위치: ${currentPos.lat.toFixed(6)}, ${currentPos.lng.toFixed(6)} (등록 시 기록됨)`;
+      },
+      () => { document.getElementById('formMeta').textContent = '⚠ 위치를 가져오지 못했습니다. 위치권한을 켜주세요.'; },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  }
+  document.getElementById('formOverlay').classList.add('show');
+}
+function closeForm() { document.getElementById('formOverlay').classList.remove('show'); }
+
+document.getElementById('photoInput').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    // 사진을 적당히 줄여서 저장 (용량 절약)
+    const img = new Image();
+    img.onload = () => {
+      const maxW = 1280;
+      const scale = Math.min(1, maxW / img.width);
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      currentPhoto = canvas.toDataURL('image/jpeg', 0.7);
+      document.getElementById('preview').innerHTML = `<img src="${currentPhoto}">`;
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+});
+
+async function saveRecord() {
+  if (!currentPos) { alert('위치 정보가 없습니다. 위치권한을 켜고 다시 시도하세요.'); return; }
+  const rec = {
+    id: Date.now().toString(),
+    time: Date.now(),
+    lat: currentPos.lat,
+    lng: currentPos.lng,
+    kind: document.getElementById('kindInput').value,
+    memo: document.getElementById('memoInput').value.trim(),
+    photo: currentPhoto
+  };
+  await putRecord(rec);
+  closeForm();
+  await loadMarkers();
+  map.setView([rec.lat, rec.lng], 17);
+}
+
+// ---------- 목록 ----------
+async function openList() {
+  const all = (await getAll()).sort((a, b) => b.time - a.time);
+  const body = document.getElementById('listBody');
+  if (all.length === 0) {
+    body.innerHTML = '<div class="empty">등록된 조사가 없습니다.</div>';
+  } else {
+    body.innerHTML = all.map(r => {
+      const when = new Date(r.time).toLocaleString('ko-KR');
+      const thumb = r.photo ? `<img src="${r.photo}">` : `<img>`;
+      return `<div class="list-item" onclick="goTo(${r.lat},${r.lng})">
+        ${thumb}
+        <div class="info">
+          <div class="t">${r.kind}</div>
+          <div class="s">${r.memo || '(메모 없음)'}</div>
+          <div class="s">${when}</div>
+        </div>
+        <div class="del" onclick="event.stopPropagation(); removeItem('${r.id}')">삭제</div>
+      </div>`;
+    }).join('');
+  }
+  document.getElementById('listOverlay').classList.add('show');
+}
+function closeList() { document.getElementById('listOverlay').classList.remove('show'); }
+function goTo(lat, lng) { closeList(); map.setView([lat, lng], 18); }
+async function removeItem(id) {
+  if (!confirm('이 조사를 삭제할까요?')) return;
+  await deleteRecord(id);
+  await loadMarkers();
+  openList();
+}
+
+// ---------- 시작 ----------
+initDB();
+</script>
+</body>
+</html>
