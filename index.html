@@ -106,6 +106,12 @@
   .preview { margin-top: 10px; }
   .preview img { width: 100%; border-radius: 10px; display: block; }
 
+  .loc-btn {
+    display: inline-block; padding: 9px 14px; border: 1px solid #1565c0;
+    background: #f5f9ff; color: #1565c0; font-size: 14px; font-weight: 600;
+    border-radius: 10px; cursor: pointer;
+  }
+  .loc-btn:active { background: #e3eefc; }
   .meta { font-size: 12px; color: #888; margin-top: 6px; line-height: 1.6; }
 
   .row-btns { display: flex; gap: 10px; margin-top: 8px; }
@@ -184,6 +190,7 @@
       <textarea id="memoInput" placeholder="예: 호안 일부 유실, 토사 퇴적 등"></textarea>
     </div>
 
+    <button type="button" class="loc-btn" onclick="useCurrentLocation()">📍 현재 위치 가져오기</button>
     <div class="meta" id="formMeta">위치/시각은 등록 시 자동 기록됩니다.</div>
 
     <div class="row-btns">
@@ -453,26 +460,32 @@ function openForm() {
   document.getElementById('preview').innerHTML = '';
   document.getElementById('memoInput').value = '';
   document.getElementById('kindInput').value = '하천';
-  document.getElementById('formMeta').textContent = '위치/시각은 등록 시 자동 기록됩니다. (PC는 위치정보 있는 사진을 업로드하세요)';
+  currentPos = null;
+  document.getElementById('formMeta').textContent = '위치: 사진(위치정보 있는 JPG)을 올리면 자동, 또는 아래 📍 버튼으로 현재 위치를 가져오세요.';
   // 입력값 재선택 가능하도록 파일 입력 초기화
   document.getElementById('photoCam').value = '';
   document.getElementById('photoFile').value = '';
-  // 폼 열 때 현재 위치 갱신 (단, 사진 EXIF 위치가 우선)
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(
-      pos => {
-        if (photoLocated) return; // 사진 위치정보를 이미 사용 중이면 덮어쓰지 않음
-        currentPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        document.getElementById('formMeta').textContent =
-          `현재 위치: ${currentPos.lat.toFixed(6)}, ${currentPos.lng.toFixed(6)} (등록 시 기록됨)`;
-      },
-      () => { if (!photoLocated) document.getElementById('formMeta').textContent = '⚠ 실시간 위치 없음. 위치권한을 켜거나, 위치정보 있는 사진을 업로드하세요.'; },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
-  }
+  // (자동 GPS 호출 제거 → 권한 팝업 반복 방지. 필요 시 useCurrentLocation() 버튼 사용)
   document.getElementById('formOverlay').classList.add('show');
 }
 function closeForm() { document.getElementById('formOverlay').classList.remove('show'); }
+
+// 폼에서 사용자가 직접 누를 때만 실시간 GPS 호출 (권한 팝업 반복 방지)
+function useCurrentLocation() {
+  if (!navigator.geolocation) { alert('이 기기/브라우저는 위치를 지원하지 않습니다.'); return; }
+  document.getElementById('formMeta').textContent = '📍 위치 가져오는 중...';
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      currentPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      photoLocated = false;
+      document.getElementById('formMeta').textContent =
+        `📍 현재 위치: ${currentPos.lat.toFixed(6)}, ${currentPos.lng.toFixed(6)} (등록 시 기록됨)`;
+    },
+    err => { document.getElementById('formMeta').textContent =
+      '⚠ 위치를 가져오지 못했습니다. (PC는 위치정보 있는 사진을 업로드하세요) ' + err.message; },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+}
 
 // exifr 지연 로드 (사진 EXIF GPS 추출용)
 async function ensureExifr() {
