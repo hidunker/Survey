@@ -83,6 +83,8 @@
   .export-option .label { font-size: 15px; font-weight: 600; }
   .export-option .desc { font-size: 12px; color: #888; margin-top: 2px; }
   .export-option:active { background: #f5f5f5; border-radius: 8px; }
+  .export-option.danger .label { color: #d32f2f; }
+  .section-cap { font-size: 12px; font-weight: 700; color: #b71c1c; margin: 18px 0 2px; letter-spacing: .3px; }
 
   /* 모달(등록 폼 / 목록) */
   .overlay {
@@ -91,6 +93,7 @@
   }
   .overlay.show { display: flex; }
   .sheet {
+    position: relative;
     background: #fff; width: 100%; max-height: 88vh; overflow-y: auto;
     border-radius: 20px 20px 0 0; padding: 20px 18px 32px;
   }
@@ -99,7 +102,19 @@
     .overlay { align-items: center; justify-content: center; }
     .sheet { max-width: 480px; border-radius: 16px; max-height: 90vh; padding: 24px 24px 28px; }
   }
-  .sheet h2 { font-size: 18px; margin-bottom: 16px; }
+  .sheet h2 { font-size: 18px; margin-bottom: 16px; padding-right: 40px; }
+  /* 시트 닫기 버튼 강조 (상단 우측, 크게) */
+  .sheet-close {
+    position: absolute; top: 12px; right: 12px; z-index: 5;
+    width: 38px; height: 38px; border-radius: 50%; border: none;
+    background: #eef0f3; color: #444; font-size: 20px; font-weight: 700;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+  }
+  .sheet-close:active { background: #e0e3e8; }
+  /* 위로만 드래그되는 시트 손잡이 표시 */
+  .sheet-handle { width: 44px; height: 5px; border-radius: 3px; background: #d8dbe0; margin: -8px auto 12px; }
+
   .field { margin-bottom: 16px; }
   .field label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 6px; color: #333; }
   .field input[type=text], .field textarea, .field select {
@@ -120,7 +135,7 @@
   .loc-btn {
     display: inline-block; padding: 9px 14px; border: 1px solid #1565c0;
     background: #f5f9ff; color: #1565c0; font-size: 14px; font-weight: 600;
-    border-radius: 10px; cursor: pointer;
+    border-radius: 10px; cursor: pointer; margin-right: 6px;
   }
   .loc-btn:active { background: #e3eefc; }
   .meta { font-size: 12px; color: #888; margin-top: 6px; line-height: 1.6; }
@@ -132,20 +147,69 @@
   }
   .btn-primary { background: #1565c0; color: #fff; }
   .btn-cancel { background: #eee; color: #444; }
+  .btn-done { background: #2e7d32 !important; color: #fff !important; }
 
   /* 목록 항목 */
+  .list-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .mini-btn {
+    border: 1px solid #cfd6df; background: #fff; color: #333; font-size: 13px; font-weight: 600;
+    padding: 7px 12px; border-radius: 8px; cursor: pointer;
+  }
+  .mini-btn.on { background: #1565c0; color: #fff; border-color: #1565c0; }
+  .mini-btn.danger { color: #d32f2f; border-color: #f3d2d2; }
+  .sel-bar {
+    display: none; align-items: center; gap: 8px; flex-wrap: wrap;
+    background: #f3f7fd; border: 1px solid #d9e6f7; border-radius: 10px;
+    padding: 10px; margin-bottom: 10px;
+  }
+  .sel-bar .cnt { font-size: 13px; font-weight: 700; color: #1565c0; margin-right: auto; }
+
   .list-item {
     display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid #eee;
     cursor: pointer; align-items: center;
   }
-  .list-item img { width: 60px; height: 60px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background:#eee; }
+  .list-item img.thumb { width: 60px; height: 60px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background:#eee; }
+  .list-item .nophoto {
+    width: 60px; height: 60px; border-radius: 8px; flex-shrink: 0; background:#eef2f7;
+    display: flex; align-items: center; justify-content: center; font-size: 22px; color:#9bb0c8;
+  }
   .list-item .info { flex: 1; min-width: 0; }
   .list-item .info .t { font-weight: 700; font-size: 15px; }
   .list-item .info .s { font-size: 12px; color: #888; margin-top: 3px; }
   .list-item .actions { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
   .list-item .edit { color: #1565c0; font-size: 13px; padding: 6px 8px; cursor: pointer; border: 1px solid #cfe0f5; border-radius: 6px; text-align: center; }
   .list-item .del { color: #d32f2f; font-size: 13px; padding: 6px 8px; cursor: pointer; border: 1px solid #f3d2d2; border-radius: 6px; text-align: center; }
+  .list-item input.chk { width: 22px; height: 22px; flex-shrink: 0; }
   .empty { text-align: center; color: #999; padding: 40px 0; font-size: 14px; }
+
+  /* 위치 지정 안내 배너 */
+  #pickHint {
+    position: fixed; top: 60px; left: 50%; transform: translateX(-50%); z-index: 1800;
+    display: none; background: #1565c0; color: #fff; padding: 10px 16px; border-radius: 20px;
+    font-size: 14px; font-weight: 600; box-shadow: 0 3px 10px rgba(0,0,0,0.3); white-space: nowrap;
+  }
+
+  /* 사진 확대 — 반화면 플로팅 패널 (모달 아님: 지도 조작 유지) */
+  #photoPanel {
+    position: fixed; z-index: 1700; display: none; flex-direction: column;
+    background: #111; box-shadow: 0 0 24px rgba(0,0,0,0.5);
+    left: 0; right: 0; bottom: 0; height: 50vh;
+  }
+  @media (min-width: 600px) {
+    #photoPanel { top: 52px; bottom: 0; left: 0; right: auto; width: 46vw; height: auto; }
+  }
+  #photoPanel .pp-bar {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    background: #1b1b1b; flex-shrink: 0;
+  }
+  #photoPanel .pp-bar .pp-title { color: #eee; font-size: 13px; font-weight: 700; margin-right: auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #photoPanel .pp-bar button {
+    border: none; border-radius: 8px; padding: 8px 14px; font-size: 14px; font-weight: 700; cursor: pointer;
+  }
+  #photoPanel .pp-edit { background: #1565c0; color: #fff; }
+  #photoPanel .pp-close { background: #3a3a3a; color: #fff; }
+  #photoPanel .pp-body { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  #photoPanel .pp-body img { max-width: 100%; max-height: 100%; object-fit: contain; }
 </style>
 </head>
 <body>
@@ -162,27 +226,33 @@
 </div>
 
 <div id="map"></div>
+<div id="pickHint">🗺️ 지도를 탭/클릭해 위치를 지정하세요 (취소: 위 닫기)</div>
 
 <button class="bulk-btn" onclick="openBulk()" title="사진 일괄 등록">🗂️</button>
-<button class="export-btn" onclick="openExport()" title="내보내기">📤</button>
+<button class="export-btn" onclick="openExport()" title="내보내기·관리">📤</button>
 <button class="list-btn" onclick="openList()" title="목록">📋</button>
 <button class="locate-btn" onclick="locateMe()" title="내 위치">📍</button>
 <button class="fab" onclick="openForm()">+ 조사 등록</button>
 
+<!-- 사진 확대 패널 (반화면, 모달 아님) -->
+<div id="photoPanel">
+  <div class="pp-bar">
+    <span class="pp-title" id="ppTitle"></span>
+    <button class="pp-edit" onclick="editFromPhoto()">✏️ 수정</button>
+    <button class="pp-close" onclick="closePhotoView()">닫기 ✕</button>
+  </div>
+  <div class="pp-body"><img id="ppImg" src="" alt=""></div>
+</div>
+
 <!-- 사진 일괄 등록 -->
 <div class="overlay" id="bulkOverlay">
   <div class="sheet">
+    <div class="sheet-handle"></div>
+    <button class="sheet-close" onclick="closeBulk()" title="닫기">✕</button>
     <h2>사진 일괄 등록 <span style="font-size:13px;font-weight:400;color:#888;">(사무실 정리용)</span></h2>
     <div class="field">
-      <label>기본 구분 <span style="font-weight:400;font-size:12px;color:#888;">(등록 후 개별 수정 가능)</span></label>
-      <select id="bulkKind">
-        <option value="하천">하천</option>
-        <option value="소하천">소하천</option>
-        <option value="댐지점">댐지점</option>
-        <option value="구조물">구조물</option>
-        <option value="불법시설물">불법시설물</option>
-        <option value="기타">기타</option>
-      </select>
+      <label>기본 구분 <span style="font-weight:400;font-size:12px;color:#888;">(등록 후 개별/일괄 수정 가능)</span></label>
+      <select id="bulkKind"></select>
     </div>
     <label class="photo-btn">
       🗂️ 사진 여러 장 선택 <span style="font-weight:400;font-size:12px;color:#5a7fb5;">(위치정보 있는 JPG)</span>
@@ -190,7 +260,7 @@
     </label>
     <div class="meta" id="bulkMeta">위치정보(EXIF)가 있는 사진은 자동으로 해당 위치에 등록됩니다.</div>
     <div class="row-btns">
-      <button class="btn-cancel" onclick="closeBulk()">닫기</button>
+      <button class="btn-cancel" id="bulkDoneBtn" onclick="closeBulk()">닫기</button>
     </div>
   </div>
 </div>
@@ -198,10 +268,12 @@
 <!-- 등록 폼 -->
 <div class="overlay" id="formOverlay">
   <div class="sheet">
-    <h2>조사 등록</h2>
+    <div class="sheet-handle"></div>
+    <button class="sheet-close" onclick="closeForm()" title="닫기">✕</button>
+    <h2 id="formTitle">조사 등록</h2>
 
     <div class="field">
-      <label>사진</label>
+      <label>사진 <span style="font-weight:400;font-size:12px;color:#888;">(선택 — 없어도 메모만으로 등록 가능)</span></label>
       <label class="photo-btn">
         📷 사진 촬영
         <input type="file" id="photoCam" accept="image/*" capture="environment">
@@ -215,22 +287,18 @@
 
     <div class="field">
       <label>종류</label>
-      <select id="kindInput">
-        <option value="하천">하천</option>
-        <option value="소하천">소하천</option>
-        <option value="댐지점">댐지점</option>
-        <option value="구조물">구조물</option>
-        <option value="불법시설물">불법시설물</option>
-        <option value="기타">기타</option>
-      </select>
+      <select id="kindInput"></select>
     </div>
 
     <div class="field">
       <label>메모 (특이사항)</label>
-      <textarea id="memoInput" placeholder="예: 호안 일부 유실, 토사 퇴적 등"></textarea>
+      <textarea id="memoInput" placeholder="예: 호안 일부 유실, 토사 퇴적 / 사무실 사전메모: 여기서 ~확인 필요 등"></textarea>
     </div>
 
-    <button type="button" class="loc-btn" onclick="useCurrentLocation()">📍 현재 위치 가져오기</button>
+    <div>
+      <button type="button" class="loc-btn" onclick="useCurrentLocation()">📍 현재 위치</button>
+      <button type="button" class="loc-btn" onclick="pickLocationOnMap()">🗺️ 지도에서 위치 지정</button>
+    </div>
     <div class="meta" id="formMeta">위치/시각은 등록 시 자동 기록됩니다.</div>
 
     <div class="row-btns">
@@ -243,7 +311,23 @@
 <!-- 목록 -->
 <div class="overlay" id="listOverlay">
   <div class="sheet">
+    <div class="sheet-handle"></div>
+    <button class="sheet-close" onclick="closeList()" title="닫기">✕</button>
     <h2>조사 목록</h2>
+
+    <div class="list-toolbar">
+      <button class="mini-btn" id="selToggle" onclick="toggleSelectMode()">☑️ 선택</button>
+      <span class="meta" style="margin:0;">여러 건을 골라 사업/구분을 한 번에 바꾸거나 삭제할 수 있어요.</span>
+    </div>
+
+    <div class="sel-bar" id="selBar">
+      <span class="cnt" id="selCount">0건 선택</span>
+      <button class="mini-btn" onclick="selectAllList()">전체선택</button>
+      <button class="mini-btn" onclick="openReassign()">사업 이동/분리</button>
+      <button class="mini-btn" onclick="openKindChange()">구분 변경</button>
+      <button class="mini-btn danger" onclick="deleteSelected()">삭제</button>
+    </div>
+
     <div id="listBody"></div>
     <div class="row-btns">
       <button class="btn-cancel" onclick="closeList()">닫기</button>
@@ -251,10 +335,46 @@
   </div>
 </div>
 
-<!-- 내보내기 -->
+<!-- 재분류: 사업 이동/분리 -->
+<div class="overlay" id="reassignOverlay">
+  <div class="sheet">
+    <button class="sheet-close" onclick="closeReassign()" title="닫기">✕</button>
+    <h2>선택 항목 → 사업 이동/분리</h2>
+    <div class="meta" id="reassignCount" style="margin-bottom:12px;"></div>
+    <div class="field">
+      <label>대상 사업 선택</label>
+      <select id="reassignProject"></select>
+    </div>
+    <button type="button" class="loc-btn" onclick="reassignNewProject()">＋ 새 사업으로 분리</button>
+    <div class="row-btns">
+      <button class="btn-cancel" onclick="closeReassign()">취소</button>
+      <button class="btn-primary" onclick="applyReassign()">이동</button>
+    </div>
+  </div>
+</div>
+
+<!-- 재분류: 구분 변경 -->
+<div class="overlay" id="kindOverlay">
+  <div class="sheet">
+    <button class="sheet-close" onclick="closeKindChange()" title="닫기">✕</button>
+    <h2>선택 항목 → 구분 변경</h2>
+    <div class="meta" id="kindCount" style="margin-bottom:12px;"></div>
+    <div class="field">
+      <label>변경할 구분</label>
+      <select id="kindChangeSelect"></select>
+    </div>
+    <div class="row-btns">
+      <button class="btn-cancel" onclick="closeKindChange()">취소</button>
+      <button class="btn-primary" onclick="applyKindChange()">변경</button>
+    </div>
+  </div>
+</div>
+
+<!-- 내보내기 · 데이터 관리 -->
 <div class="overlay" id="exportOverlay">
   <div class="sheet">
-    <h2>데이터 내보내기</h2>
+    <button class="sheet-close" onclick="closeExport()" title="닫기">✕</button>
+    <h2>내보내기 · 데이터 관리</h2>
 
     <div class="export-option" onclick="exportCSV()">
       <div class="icon">📊</div>
@@ -289,6 +409,22 @@
     </div>
     <input type="file" id="importInput" accept=".json" style="display:none" onchange="importJSON(event)">
 
+    <div class="section-cap">데이터 삭제 (되돌릴 수 없음)</div>
+    <div class="export-option danger" onclick="clearCurrentProject()">
+      <div class="icon">🧹</div>
+      <div>
+        <div class="label">현재 사업 데이터 비우기</div>
+        <div class="desc">선택된 사업의 모든 조사·사진 삭제 (사업 자체는 유지)</div>
+      </div>
+    </div>
+    <div class="export-option danger" onclick="clearAllData()">
+      <div class="icon">⚠️</div>
+      <div>
+        <div class="label">전체 데이터 삭제</div>
+        <div class="desc">이 기기의 모든 조사·사진 삭제</div>
+      </div>
+    </div>
+
     <div class="row-btns" style="margin-top:16px">
       <button class="btn-cancel" onclick="closeExport()">닫기</button>
     </div>
@@ -297,27 +433,33 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-// ---------- 지도 초기화 ----------
+// ========== 공통 상수 ==========
+const KINDS = ['하천', '소하천', '댐지점', '구조물', '불법시설물', '기타'];
+function kindOptions(sel) {
+  return KINDS.map(k => `<option value="${k}" ${k === sel ? 'selected' : ''}>${k}</option>`).join('');
+}
+// 정적 select들 채우기
+document.getElementById('kindInput').innerHTML   = kindOptions('하천');
+document.getElementById('bulkKind').innerHTML    = kindOptions('하천');
+document.getElementById('kindChangeSelect').innerHTML = kindOptions('하천');
+
+// ========== 지도 초기화 ==========
 const VWORLD_KEY = 'BBCD79DD-0859-3B41-A7C9-34898DA8FC43';
-// VWorld WMTS 타일 (z/y/x 순서). Base=일반, Satellite=위성, Hybrid=위성용 지명·경계 오버레이
 const vworldUrl = (layer, ext) =>
   `https://api.vworld.kr/req/wmts/1.0.0/${VWORLD_KEY}/${layer}/{z}/{y}/{x}.${ext}`;
 
 const map = L.map('map', { zoomControl: false }).setView([36.5, 127.8], 7); // 대한민국 중심
 
-// 배경 레이어
 const vBase   = L.tileLayer(vworldUrl('Base', 'png'),       { maxZoom: 19, attribution: 'VWorld' });
 const vSat    = L.tileLayer(vworldUrl('Satellite', 'jpeg'), { maxZoom: 19, attribution: 'VWorld' });
-const vHybrid = L.tileLayer(vworldUrl('Hybrid', 'png'),     { maxZoom: 19 }); // 위성 위 지명/경계
+const vHybrid = L.tileLayer(vworldUrl('Hybrid', 'png'),     { maxZoom: 19 });
 const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-                            { maxZoom: 19, attribution: 'Esri' }); // 키 불필요 위성(대체)
+                            { maxZoom: 19, attribution: 'Esri' });
 const osm     = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                            { maxZoom: 19, attribution: '© OpenStreetMap' }); // 대체 일반
+                            { maxZoom: 19, attribution: '© OpenStreetMap' });
 
-// 기본: VWorld 일반지도
 vBase.addTo(map);
 
-// 일반/위성 전환 컨트롤
 const baseLayers = {
   '일반지도 (VWorld)':     vBase,
   '위성지도 (VWorld)':     vSat,
@@ -327,11 +469,8 @@ const baseLayers = {
 const overlays = { '위성 지명·경계': vHybrid };
 L.control.layers(baseLayers, overlays, { position: 'topright', collapsed: false }).addTo(map);
 L.control.zoom({ position: 'topright' }).addTo(map);
-
-// 축척 바 (뷰 이동·줌 시 자동 갱신)
 L.control.scale({ position: 'bottomleft', metric: true, imperial: false, maxWidth: 140 }).addTo(map);
 
-// 방위(북) 표시 — Leaflet은 지도를 회전시키지 않아 항상 위가 북쪽
 const NorthArrow = L.Control.extend({
   options: { position: 'topleft' },
   onAdd() {
@@ -348,7 +487,6 @@ const NorthArrow = L.Control.extend({
 });
 map.addControl(new NorthArrow());
 
-// VWorld 타일이 (도메인 미등록 / 로컬 file://) 안 뜨면 OSM으로 1회 자동 대체
 let vworldFailed = false;
 vBase.on('tileerror', () => {
   if (vworldFailed) return;
@@ -357,22 +495,34 @@ vBase.on('tileerror', () => {
   console.warn('VWorld 타일 로드 실패 → OSM 임시 대체. GitHub Pages 도메인 등록 후 정상 동작합니다.');
 });
 
-// 위성 계열 선택 시 지명·경계 오버레이 자동 동반
+// 배경에 따라 마커 가시색 결정 (위성=식생/물/토양 어디서나 보이는 고대비색)
+let isSatellite = false;
+function markerStyle() {
+  return isSatellite
+    ? { radius: 9, color: '#ffffff', fillColor: '#ff2d95', fillOpacity: 0.95, weight: 2 } // 위성: 자홍+흰테두리
+    : { radius: 9, color: '#2e7d32', fillColor: '#43a047', fillOpacity: 0.9, weight: 2 };   // 일반: 초록
+}
+function applyMarkerStyles() { recordMarkers.forEach(m => m.setStyle(markerStyle())); }
+
 map.on('baselayerchange', e => {
   const sat = e.name.includes('위성');
+  isSatellite = sat;
   if (sat && !map.hasLayer(vHybrid)) vHybrid.addTo(map);
   if (!sat && map.hasLayer(vHybrid)) map.removeLayer(vHybrid);
+  applyMarkerStyles();
 });
 
-let myMarker = null;       // 내 위치 마커
-let currentPos = null;     // 현재 GPS 좌표 {lat, lng}
-let currentPhoto = null;   // 등록 폼에서 선택한 사진 (dataURL)
-let photoLocated = false;  // 사진 EXIF 위치정보를 위치로 사용했는지
-let editId = null;         // 수정 중인 조사 id (없으면 신규 등록)
+let myMarker = null;
+let currentPos = null;
+let currentPhoto = null;
+let photoLocated = false;
+let editId = null;
+let cameFromList = false;   // 목록에서 수정 진입 → 저장 후 목록 복귀
+let pickingLocation = false;
 
-// ---------- IndexedDB (계층: projects → records → photos[embedded]) ----------
+// ========== IndexedDB (projects → records) ==========
 let db;
-let currentProjectId = null;   // 현재 선택된 사업 id
+let currentProjectId = null;
 const DB_NAME = 'fieldSurveyDB';
 const STORE = 'records';
 const PROJECTS = 'projects';
@@ -388,17 +538,14 @@ function initDB() {
   req.onerror = () => alert('저장소를 열 수 없습니다.');
 }
 
-// 최초 실행/업그레이드 시: 기본 사업 보장 + 기존 조사 무손실 이관
 async function migrateAndInit() {
   let projects = await getAllProjects();
   if (projects.length === 0) {
     await putProject({ id: 'default', name: '기본 사업', created: Date.now() });
     projects = await getAllProjects();
   }
-  // 사업이 없는 기존 조사는 기본 사업으로 귀속
   const orphans = (await getAll()).filter(r => !r.projectId);
   for (const r of orphans) { r.projectId = 'default'; await putRecord(r); }
-  // 현재 사업 결정 (저장된 선택 우선)
   currentProjectId = localStorage.getItem('currentProjectId');
   if (!projects.find(p => p.id === currentProjectId)) currentProjectId = projects[0].id;
   localStorage.setItem('currentProjectId', currentProjectId);
@@ -424,7 +571,12 @@ function deleteRecord(id) {
     tx.onsuccess = () => res();
   });
 }
-// 사업(projects) 저장소 헬퍼
+function clearStore(name) {
+  return new Promise((res) => {
+    const tx = db.transaction(name, 'readwrite').objectStore(name).clear();
+    tx.onsuccess = () => res();
+  });
+}
 function getAllProjects() {
   return new Promise((res) => {
     const tx = db.transaction(PROJECTS, 'readonly').objectStore(PROJECTS).getAll();
@@ -438,7 +590,7 @@ function putProject(p) {
   });
 }
 
-// ---------- 사업 선택/생성 ----------
+// ========== 사업 선택/생성 ==========
 function renderProjectSelect(projects) {
   const sel = document.getElementById('projectSelect');
   sel.innerHTML = projects
@@ -461,7 +613,7 @@ async function newProject() {
   loadMarkers();
 }
 
-// ---------- 마커 표시 ----------
+// ========== 마커 표시 ==========
 let recordMarkers = [];
 async function loadMarkers() {
   recordMarkers.forEach(m => map.removeLayer(m));
@@ -469,17 +621,17 @@ async function loadMarkers() {
   const all = (await getAll()).filter(r => r.projectId === currentProjectId);
   document.getElementById('count').textContent = '조사: ' + all.length + '건';
   all.forEach(r => {
-    const m = L.circleMarker([r.lat, r.lng], {
-      radius: 9, color: '#2e7d32', fillColor: '#43a047', fillOpacity: 0.9, weight: 2
-    }).addTo(map);
+    const m = L.circleMarker([r.lat, r.lng], markerStyle()).addTo(map);
     const when = new Date(r.time).toLocaleString('ko-KR');
-    const img = r.photo ? `<img src="${r.photo}" style="width:160px;border-radius:6px;display:block;margin-top:6px;">` : '';
+    const img = r.photo
+      ? `<img src="${r.photo}" style="width:160px;border-radius:6px;display:block;margin-top:6px;cursor:pointer;" onclick="openPhotoView('${r.id}')" title="클릭하면 크게 보기">`
+      : '';
     m.bindPopup(`<b>${r.kind}</b><br>${r.memo || '(메모 없음)'}<br><small>${when}</small>${img}`);
     recordMarkers.push(m);
   });
 }
 
-// ---------- 내 위치 ----------
+// ========== 내 위치 ==========
 function locateMe() {
   if (!navigator.geolocation) { alert('이 기기는 위치를 지원하지 않습니다.'); return; }
   navigator.geolocation.getCurrentPosition(
@@ -494,26 +646,23 @@ function locateMe() {
   );
 }
 
-// ---------- 등록 폼 ----------
+// ========== 등록 폼 ==========
 function openForm() {
-  editId = null;
-  document.querySelector('#formOverlay h2').textContent = '조사 등록';
-  currentPhoto = null;
-  photoLocated = false;
+  editId = null; cameFromList = false;
+  document.getElementById('formTitle').textContent = '조사 등록';
+  currentPhoto = null; photoLocated = false;
   document.getElementById('preview').innerHTML = '';
   document.getElementById('memoInput').value = '';
   document.getElementById('kindInput').value = '하천';
   currentPos = null;
-  document.getElementById('formMeta').textContent = '위치: 사진(위치정보 있는 JPG)을 올리면 자동, 또는 아래 📍 버튼으로 현재 위치를 가져오세요.';
-  // 입력값 재선택 가능하도록 파일 입력 초기화
+  document.getElementById('formMeta').textContent =
+    '위치: 사진(위치정보 있는 JPG)·📍현재위치·🗺️지도지정 중 하나로 지정하세요. (사진 없이 메모만도 가능)';
   document.getElementById('photoCam').value = '';
   document.getElementById('photoFile').value = '';
-  // (자동 GPS 호출 제거 → 권한 팝업 반복 방지. 필요 시 useCurrentLocation() 버튼 사용)
   document.getElementById('formOverlay').classList.add('show');
 }
 function closeForm() { document.getElementById('formOverlay').classList.remove('show'); }
 
-// 폼에서 사용자가 직접 누를 때만 실시간 GPS 호출 (권한 팝업 반복 방지)
 function useCurrentLocation() {
   if (!navigator.geolocation) { alert('이 기기/브라우저는 위치를 지원하지 않습니다.'); return; }
   document.getElementById('formMeta').textContent = '📍 위치 가져오는 중...';
@@ -525,12 +674,41 @@ function useCurrentLocation() {
         `📍 현재 위치: ${currentPos.lat.toFixed(6)}, ${currentPos.lng.toFixed(6)} (등록 시 기록됨)`;
     },
     err => { document.getElementById('formMeta').textContent =
-      '⚠ 위치를 가져오지 못했습니다. (PC는 위치정보 있는 사진을 업로드하세요) ' + err.message; },
+      '⚠ 위치를 가져오지 못했습니다. (PC는 사진 업로드 또는 🗺️ 지도지정을 사용하세요) ' + err.message; },
     { enableHighAccuracy: true, timeout: 10000 }
   );
 }
 
-// exifr 지연 로드 (사진 EXIF GPS 추출용)
+// 지도를 클릭해 위치 지정 (PC·사무실에서 GPS/사진 없이 메모만 등록할 때 유용)
+function pickLocationOnMap() {
+  pickingLocation = true;
+  document.getElementById('formOverlay').classList.remove('show');
+  document.getElementById('pickHint').style.display = 'block';
+  map.getContainer().style.cursor = 'crosshair';
+  map.once('click', e => {
+    if (!pickingLocation) return;
+    finishPick();
+    currentPos = { lat: e.latlng.lat, lng: e.latlng.lng };
+    photoLocated = false;
+    document.getElementById('formMeta').textContent =
+      `🗺️ 지정 위치: ${currentPos.lat.toFixed(6)}, ${currentPos.lng.toFixed(6)} (등록 시 기록됨)`;
+    document.getElementById('formOverlay').classList.add('show');
+  });
+}
+function finishPick() {
+  pickingLocation = false;
+  document.getElementById('pickHint').style.display = 'none';
+  map.getContainer().style.cursor = '';
+}
+// 안내 배너 클릭 시 위치지정 취소하고 폼 복귀
+document.getElementById('pickHint').addEventListener('click', () => {
+  if (!pickingLocation) return;
+  map.off('click');
+  finishPick();
+  document.getElementById('formOverlay').classList.add('show');
+});
+
+// exifr 지연 로드
 async function ensureExifr() {
   if (window.exifr) return;
   await new Promise((res, rej) => {
@@ -540,8 +718,6 @@ async function ensureExifr() {
     document.head.appendChild(s);
   });
 }
-
-// 사진을 가로 maxW로 줄여 dataURL 반환 (용량 절약) — 단건/일괄 공용
 function resizePhoto(file, maxW = 1280, quality = 0.7) {
   return new Promise(res => {
     const reader = new FileReader();
@@ -560,7 +736,6 @@ function resizePhoto(file, maxW = 1280, quality = 0.7) {
     reader.readAsDataURL(file);
   });
 }
-// 사진에서 EXIF GPS 추출 (없으면 null)
 async function readPhotoGps(file) {
   try { await ensureExifr(); const g = await window.exifr.gps(file).catch(() => null);
     return (g && typeof g.latitude === 'number') ? { lat: g.latitude, lng: g.longitude } : null;
@@ -578,14 +753,46 @@ async function handlePhotoFile(file) {
   currentPhoto = await resizePhoto(file);
   document.getElementById('preview').innerHTML = `<img src="${currentPhoto}">`;
 }
-
 document.getElementById('photoCam').addEventListener('change', e => handlePhotoFile(e.target.files[0]));
 document.getElementById('photoFile').addEventListener('change', e => handlePhotoFile(e.target.files[0]));
 
-// ---------- 사진 일괄 등록 (사무실 정리용) ----------
+async function saveRecord() {
+  if (!currentPos) {
+    alert('위치 정보가 없습니다. 사진(위치정보 있는 JPG)·📍현재위치·🗺️지도지정 중 하나로 위치를 지정하세요.');
+    return;
+  }
+  const kind = document.getElementById('kindInput').value;
+  const memo = document.getElementById('memoInput').value.trim();
+  let rec;
+  if (editId) {
+    rec = (await getAll()).find(r => r.id === editId) || { id: editId, projectId: currentProjectId };
+    rec.kind = kind; rec.memo = memo;
+    rec.lat = currentPos.lat; rec.lng = currentPos.lng;
+    if (currentPhoto) rec.photo = currentPhoto;
+  } else {
+    rec = {
+      id: Date.now().toString(), projectId: currentProjectId, time: Date.now(),
+      lat: currentPos.lat, lng: currentPos.lng, kind, memo, photo: currentPhoto || null
+    };
+  }
+  await putRecord(rec);
+  const wasFromList = cameFromList;
+  editId = null; cameFromList = false;
+  closeForm();
+  await loadMarkers();
+  if (wasFromList) {
+    openList();              // 연속 수정: 목록에 머무름
+  } else {
+    map.setView([rec.lat, rec.lng], 17);
+  }
+}
+
+// ========== 사진 일괄 등록 ==========
 function openBulk() {
   document.getElementById('bulkInput').value = '';
-  document.getElementById('bulkMeta').textContent = '위치정보(EXIF)가 있는 사진은 자동으로 해당 위치에 등록됩니다. 구분·메모는 등록 후 개별 수정 가능합니다.';
+  document.getElementById('bulkMeta').textContent = '위치정보(EXIF)가 있는 사진은 자동으로 해당 위치에 등록됩니다. 구분·메모는 등록 후 개별/일괄 수정 가능합니다.';
+  const btn = document.getElementById('bulkDoneBtn');
+  btn.textContent = '닫기'; btn.classList.remove('btn-done'); btn.classList.add('btn-cancel');
   document.getElementById('bulkOverlay').classList.add('show');
 }
 function closeBulk() { document.getElementById('bulkOverlay').classList.remove('show'); }
@@ -600,7 +807,7 @@ document.getElementById('bulkInput').addEventListener('change', async e => {
     meta.textContent = `처리 중... ${i + 1} / ${files.length}`;
     const f = files[i];
     const gps = await readPhotoGps(f);
-    if (!gps) { noloc++; continue; }              // 위치정보 없는 사진은 제외(나중에 단건 등록 가능)
+    if (!gps) { noloc++; continue; }
     const photo = await resizePhoto(f);
     await putRecord({
       id: Date.now().toString() + '_' + i,
@@ -612,79 +819,99 @@ document.getElementById('bulkInput').addEventListener('change', async e => {
     ok++;
   }
   await loadMarkers();
-  meta.textContent = `완료: ${ok}건 등록${noloc ? `, 위치정보 없는 ${noloc}건 제외` : ''}. 구분·메모는 목록에서 수정하세요.`;
+  meta.textContent = `✅ 완료: ${ok}건 등록${noloc ? `, 위치정보 없는 ${noloc}건 제외` : ''}. 구분·메모는 목록에서 수정하세요.`;
+  // 완료 버튼 강조
+  const btn = document.getElementById('bulkDoneBtn');
+  btn.textContent = `✅ 완료 — 닫기 (${ok}건)`;
+  btn.classList.remove('btn-cancel'); btn.classList.add('btn-done');
 });
 
-async function saveRecord() {
-  if (!currentPos) { alert('위치 정보가 없습니다. 사진(위치정보 있는 JPG)을 올리거나 📍 버튼으로 위치를 지정하세요.'); return; }
-  const kind = document.getElementById('kindInput').value;
-  const memo = document.getElementById('memoInput').value.trim();
-  let rec;
-  if (editId) {
-    // 수정: 기존 레코드 유지 + 변경분 반영
-    rec = (await getAll()).find(r => r.id === editId) || { id: editId, projectId: currentProjectId };
-    rec.kind = kind; rec.memo = memo;
-    rec.lat = currentPos.lat; rec.lng = currentPos.lng;
-    if (currentPhoto) rec.photo = currentPhoto; // 사진 새로 고른 경우만 교체
-  } else {
-    rec = {
-      id: Date.now().toString(), projectId: currentProjectId, time: Date.now(),
-      lat: currentPos.lat, lng: currentPos.lng, kind, memo, photo: currentPhoto
-    };
-  }
-  await putRecord(rec);
-  editId = null;
-  closeForm();
-  await loadMarkers();
-  map.setView([rec.lat, rec.lng], 17);
+// ========== 사진 확대 패널 (반화면) ==========
+let photoViewId = null;
+async function openPhotoView(id) {
+  const rec = (await getAll()).find(r => r.id === id);
+  if (!rec || !rec.photo) return;
+  photoViewId = id;
+  document.getElementById('ppImg').src = rec.photo;
+  document.getElementById('ppTitle').textContent =
+    `${rec.kind}${rec.memo ? ' · ' + rec.memo : ''}`;
+  document.getElementById('photoPanel').style.display = 'flex';
+}
+function closePhotoView() {
+  document.getElementById('photoPanel').style.display = 'none';
+  photoViewId = null;
+}
+function editFromPhoto() {
+  const id = photoViewId;
+  closePhotoView();
+  if (id) { cameFromList = false; editItem(id); }
 }
 
-// ---------- 목록 ----------
+// ========== 목록 ==========
+let selectMode = false;
+let selectedIds = new Set();
+let listCache = [];
+
 async function openList() {
-  const all = (await getAll()).filter(r => r.projectId === currentProjectId).sort((a, b) => b.time - a.time);
+  listCache = (await getAll()).filter(r => r.projectId === currentProjectId).sort((a, b) => b.time - a.time);
+  renderList();
+  document.getElementById('listOverlay').classList.add('show');
+}
+function renderList() {
   const body = document.getElementById('listBody');
-  if (all.length === 0) {
+  if (listCache.length === 0) {
     body.innerHTML = '<div class="empty">등록된 조사가 없습니다.</div>';
   } else {
-    body.innerHTML = all.map(r => {
+    body.innerHTML = listCache.map(r => {
       const when = new Date(r.time).toLocaleString('ko-KR');
-      const thumb = r.photo ? `<img src="${r.photo}">` : `<img>`;
-      return `<div class="list-item" onclick="goTo(${r.lat},${r.lng})">
+      const thumb = r.photo
+        ? `<img class="thumb" src="${r.photo}" onclick="event.stopPropagation(); openPhotoView('${r.id}')" title="크게 보기">`
+        : `<div class="nophoto" title="사진 없음(정보 기록)">📝</div>`;
+      const chk = selectMode
+        ? `<input type="checkbox" class="chk" ${selectedIds.has(r.id) ? 'checked' : ''} onclick="event.stopPropagation(); toggleSel('${r.id}', this.checked)">`
+        : '';
+      const actions = selectMode ? '' : `
+        <div class="actions">
+          <div class="edit" onclick="event.stopPropagation(); editItem('${r.id}')">수정</div>
+          <div class="del" onclick="event.stopPropagation(); removeItem('${r.id}')">삭제</div>
+        </div>`;
+      const rowClick = selectMode
+        ? `onclick="toggleSel('${r.id}')"`
+        : `onclick="goTo(${r.lat},${r.lng})"`;
+      return `<div class="list-item" ${rowClick}>
+        ${chk}
         ${thumb}
         <div class="info">
           <div class="t">${r.kind}</div>
           <div class="s">${r.memo || '(메모 없음)'}</div>
           <div class="s">${when}</div>
         </div>
-        <div class="actions">
-          <div class="edit" onclick="event.stopPropagation(); editItem('${r.id}')">수정</div>
-          <div class="del" onclick="event.stopPropagation(); removeItem('${r.id}')">삭제</div>
-        </div>
+        ${actions}
       </div>`;
     }).join('');
   }
-  document.getElementById('listOverlay').classList.add('show');
+  updateSelCount();
 }
 function closeList() { document.getElementById('listOverlay').classList.remove('show'); }
 function goTo(lat, lng) { closeList(); map.setView([lat, lng], 18); }
 
-// 목록에서 구분·메모·사진 수정
 async function editItem(id) {
   const rec = (await getAll()).find(r => r.id === id);
   if (!rec) return;
+  cameFromList = document.getElementById('listOverlay').classList.contains('show');
   closeList();
   editId = id;
   currentPhoto = rec.photo || null;
   currentPos = { lat: rec.lat, lng: rec.lng };
   photoLocated = false;
-  document.querySelector('#formOverlay h2').textContent = '조사 수정';
+  document.getElementById('formTitle').textContent = '조사 수정';
   document.getElementById('preview').innerHTML = rec.photo ? `<img src="${rec.photo}">` : '';
   document.getElementById('memoInput').value = rec.memo || '';
   document.getElementById('kindInput').value = rec.kind || '하천';
   document.getElementById('photoCam').value = '';
   document.getElementById('photoFile').value = '';
   document.getElementById('formMeta').textContent =
-    `수정 중 — 위치: ${rec.lat.toFixed(6)}, ${rec.lng.toFixed(6)} (사진을 새로 올리면 교체됩니다)`;
+    `수정 중 — 위치: ${rec.lat.toFixed(6)}, ${rec.lng.toFixed(6)} (사진을 새로 올리면 교체, 🗺️로 위치 변경 가능)`;
   document.getElementById('formOverlay').classList.add('show');
 }
 async function removeItem(id) {
@@ -694,21 +921,113 @@ async function removeItem(id) {
   openList();
 }
 
-// ---------- 내보내기 ----------
+// ----- 다중 선택 -----
+function toggleSelectMode() {
+  selectMode = !selectMode;
+  selectedIds.clear();
+  document.getElementById('selToggle').classList.toggle('on', selectMode);
+  document.getElementById('selToggle').textContent = selectMode ? '☑️ 선택 해제' : '☑️ 선택';
+  document.getElementById('selBar').style.display = selectMode ? 'flex' : 'none';
+  renderList();
+}
+function toggleSel(id, forced) {
+  if (typeof forced === 'boolean') {
+    if (forced) selectedIds.add(id); else selectedIds.delete(id);
+  } else {
+    if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id);
+  }
+  renderList();
+}
+function selectAllList() {
+  if (selectedIds.size === listCache.length) selectedIds.clear();
+  else listCache.forEach(r => selectedIds.add(r.id));
+  renderList();
+}
+function updateSelCount() {
+  const el = document.getElementById('selCount');
+  if (el) el.textContent = `${selectedIds.size}건 선택`;
+}
+
+// 사업 이동/분리
+async function openReassign() {
+  if (selectedIds.size === 0) { alert('먼저 항목을 선택하세요.'); return; }
+  const projects = await getAllProjects();
+  document.getElementById('reassignProject').innerHTML = projects
+    .map(p => `<option value="${p.id}" ${p.id === currentProjectId ? 'selected' : ''}>${p.name}</option>`)
+    .join('');
+  document.getElementById('reassignCount').textContent = `${selectedIds.size}건을 다른 사업으로 이동/분리합니다.`;
+  document.getElementById('reassignOverlay').classList.add('show');
+}
+function closeReassign() { document.getElementById('reassignOverlay').classList.remove('show'); }
+async function reassignNewProject() {
+  const name = prompt('새 사업(분리 대상) 이름을 입력하세요');
+  if (!name || !name.trim()) return;
+  const id = 'p' + Date.now();
+  await putProject({ id, name: name.trim(), created: Date.now() });
+  const sel = document.getElementById('reassignProject');
+  sel.innerHTML += `<option value="${id}" selected>${name.trim()}</option>`;
+  sel.value = id;
+}
+async function applyReassign() {
+  const target = document.getElementById('reassignProject').value;
+  const ids = [...selectedIds];
+  if (!confirm(`${ids.length}건을 선택한 사업으로 이동합니다. 계속할까요?`)) return;
+  const all = await getAll();
+  for (const r of all) {
+    if (selectedIds.has(r.id)) { r.projectId = target; await putRecord(r); }
+  }
+  closeReassign();
+  selectedIds.clear();
+  renderProjectSelect(await getAllProjects());
+  await loadMarkers();
+  await openList();           // 목록 갱신·유지
+}
+
+// 구분 변경
+function openKindChange() {
+  if (selectedIds.size === 0) { alert('먼저 항목을 선택하세요.'); return; }
+  document.getElementById('kindCount').textContent = `${selectedIds.size}건의 구분을 한 번에 변경합니다.`;
+  document.getElementById('kindOverlay').classList.add('show');
+}
+function closeKindChange() { document.getElementById('kindOverlay').classList.remove('show'); }
+async function applyKindChange() {
+  const kind = document.getElementById('kindChangeSelect').value;
+  const ids = [...selectedIds];
+  if (!confirm(`${ids.length}건의 구분을 "${kind}"(으)로 변경합니다. 계속할까요?`)) return;
+  const all = await getAll();
+  for (const r of all) {
+    if (selectedIds.has(r.id)) { r.kind = kind; await putRecord(r); }
+  }
+  closeKindChange();
+  selectedIds.clear();
+  await loadMarkers();
+  await openList();
+}
+
+// 일괄 삭제
+async function deleteSelected() {
+  if (selectedIds.size === 0) { alert('먼저 항목을 선택하세요.'); return; }
+  if (!confirm(`${selectedIds.size}건을 삭제합니다. 되돌릴 수 없습니다. 계속할까요?`)) return;
+  for (const id of selectedIds) await deleteRecord(id);
+  selectedIds.clear();
+  await loadMarkers();
+  await openList();
+}
+
+// ========== 내보내기 ==========
 function openExport() { document.getElementById('exportOverlay').classList.add('show'); }
 function closeExport() { document.getElementById('exportOverlay').classList.remove('show'); }
 
 async function exportCSV() {
   const all = (await getAll()).filter(r => r.projectId === currentProjectId).sort((a, b) => a.time - b.time);
   if (!all.length) { alert('현재 사업에 등록된 데이터가 없습니다.'); return; }
-  const header = ['id', '시각', '위도', '경도', '종류', '메모'];
+  const header = ['id', '시각', '위도', '경도', '종류', '메모', '사진유무'];
   const rows = all.map(r => [
     r.id,
     new Date(r.time).toLocaleString('ko-KR'),
-    r.lat,
-    r.lng,
-    r.kind,
-    '"' + (r.memo || '').replace(/"/g, '""') + '"'
+    r.lat, r.lng, r.kind,
+    '"' + (r.memo || '').replace(/"/g, '""') + '"',
+    r.photo ? 'Y' : 'N'
   ]);
   const csv = '﻿' + [header, ...rows].map(r => r.join(',')).join('\r\n');
   downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), '현장조사_' + dateTag() + '.csv');
@@ -730,7 +1049,6 @@ async function importJSON(e) {
   try { records = JSON.parse(text); } catch { alert('JSON 파일을 읽을 수 없습니다.'); return; }
   if (!Array.isArray(records)) { alert('올바른 백업 파일이 아닙니다.'); return; }
   if (!confirm(`${records.length}건을 현재 사업으로 복원합니다. 기존 데이터에 추가(덮어쓰기)됩니다. 계속할까요?`)) return;
-  // 사업 정보가 없거나 알 수 없는 조사는 현재 사업으로 귀속
   const ids = new Set((await getAllProjects()).map(p => p.id));
   for (const r of records) {
     if (!r.projectId || !ids.has(r.projectId)) r.projectId = currentProjectId;
@@ -745,7 +1063,6 @@ async function exportPhotosZip() {
   const all = await getAll();
   const withPhoto = all.filter(r => r.projectId === currentProjectId && r.photo);
   if (!withPhoto.length) { alert('현재 사업에 저장된 사진이 없습니다.'); return; }
-  // JSZip 지연 로드
   if (!window.JSZip) {
     await new Promise((res, rej) => {
       const s = document.createElement('script');
@@ -764,6 +1081,29 @@ async function exportPhotosZip() {
   downloadBlob(blob, '현장조사_사진_' + dateTag() + '.zip');
 }
 
+// ----- 데이터 삭제 -----
+async function clearCurrentProject() {
+  const all = (await getAll()).filter(r => r.projectId === currentProjectId);
+  if (!all.length) { alert('현재 사업에 삭제할 데이터가 없습니다.'); return; }
+  const projName = document.getElementById('projectSelect').selectedOptions[0]?.text || '현재 사업';
+  if (!confirm(`[${projName}]의 조사 ${all.length}건을 모두 삭제합니다. 되돌릴 수 없습니다. 계속할까요?`)) return;
+  if (!confirm('정말 삭제할까요? (마지막 확인)')) return;
+  for (const r of all) await deleteRecord(r.id);
+  await loadMarkers();
+  alert(`${all.length}건 삭제 완료.`);
+  closeExport();
+}
+async function clearAllData() {
+  const all = await getAll();
+  if (!all.length) { alert('삭제할 데이터가 없습니다.'); return; }
+  if (!confirm(`이 기기의 모든 조사 ${all.length}건을 삭제합니다. 되돌릴 수 없습니다. 계속할까요?`)) return;
+  if (!confirm('정말 전체 삭제할까요? (마지막 확인)')) return;
+  await clearStore(STORE);
+  await loadMarkers();
+  alert('전체 데이터 삭제 완료.');
+  closeExport();
+}
+
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -771,12 +1111,11 @@ function downloadBlob(blob, filename) {
   document.body.appendChild(a); a.click();
   setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
 }
-
 function dateTag() {
   return new Date().toISOString().slice(0, 10).replace(/-/g, '');
 }
 
-// ---------- 시작 ----------
+// ========== 시작 ==========
 initDB();
 </script>
 </body>
