@@ -140,8 +140,12 @@
     <div class="field">
       <label>사진</label>
       <label class="photo-btn">
-        📷 사진 촬영 / 선택
-        <input type="file" id="photoInput" accept="image/*" capture="environment">
+        📷 사진 촬영
+        <input type="file" id="photoCam" accept="image/*" capture="environment">
+      </label>
+      <label class="photo-btn" style="margin-top:8px;">
+        🖼️ 사진 업로드 <span style="font-weight:400;font-size:12px;color:#5a7fb5;">(위치정보 있는 JPG면 위치 자동 입력)</span>
+        <input type="file" id="photoFile" accept="image/*">
       </label>
       <div class="preview" id="preview"></div>
     </div>
@@ -299,6 +303,7 @@ map.on('baselayerchange', e => {
 let myMarker = null;       // 내 위치 마커
 let currentPos = null;     // 현재 GPS 좌표 {lat, lng}
 let currentPhoto = null;   // 등록 폼에서 선택한 사진 (dataURL)
+let photoLocated = false;  // 사진 EXIF 위치정보를 위치로 사용했는지
 
 // ---------- IndexedDB ----------
 let db;
@@ -369,18 +374,24 @@ function locateMe() {
 // ---------- 등록 폼 ----------
 function openForm() {
   currentPhoto = null;
+  photoLocated = false;
   document.getElementById('preview').innerHTML = '';
   document.getElementById('memoInput').value = '';
   document.getElementById('kindInput').value = '하천';
-  // 폼 열 때 현재 위치 갱신
+  document.getElementById('formMeta').textContent = '위치/시각은 등록 시 자동 기록됩니다. (PC는 위치정보 있는 사진을 업로드하세요)';
+  // 입력값 재선택 가능하도록 파일 입력 초기화
+  document.getElementById('photoCam').value = '';
+  document.getElementById('photoFile').value = '';
+  // 폼 열 때 현재 위치 갱신 (단, 사진 EXIF 위치가 우선)
   if (navigator.geolocation) {
     navigator.geolocation.getCurrentPosition(
       pos => {
+        if (photoLocated) return; // 사진 위치정보를 이미 사용 중이면 덮어쓰지 않음
         currentPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         document.getElementById('formMeta').textContent =
           `현재 위치: ${currentPos.lat.toFixed(6)}, ${currentPos.lng.toFixed(6)} (등록 시 기록됨)`;
       },
-      () => { document.getElementById('formMeta').textContent = '⚠ 위치를 가져오지 못했습니다. 위치권한을 켜주세요.'; },
+      () => { if (!photoLocated) document.getElementById('formMeta').textContent = '⚠ 실시간 위치 없음. 위치권한을 켜거나, 위치정보 있는 사진을 업로드하세요.'; },
       { enableHighAccuracy: true, timeout: 10000 }
     );
   }
@@ -388,12 +399,33 @@ function openForm() {
 }
 function closeForm() { document.getElementById('formOverlay').classList.remove('show'); }
 
-document.getElementById('photoInput').addEventListener('change', e => {
-  const file = e.target.files[0];
+// exifr 지연 로드 (사진 EXIF GPS 추출용)
+async function ensureExifr() {
+  if (window.exifr) return;
+  await new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/exifr/dist/full.umd.js';
+    s.onload = res; s.onerror = rej;
+    document.head.appendChild(s);
+  });
+}
+
+async function handlePhotoFile(file) {
   if (!file) return;
+  // 1) 사진에 위치정보(EXIF GPS)가 있으면 조사 위치로 사용 (PC 업로드 시 유용)
+  try {
+    await ensureExifr();
+    const gps = await window.exifr.gps(file).catch(() => null);
+    if (gps && typeof gps.latitude === 'number') {
+      currentPos = { lat: gps.latitude, lng: gps.longitude };
+      photoLocated = true;
+      document.getElementById('formMeta').textContent =
+        `📷 사진 위치정보 사용: ${currentPos.lat.toFixed(6)}, ${currentPos.lng.toFixed(6)} (등록 시 기록됨)`;
+    }
+  } catch (_) { /* EXIF 없거나 읽기 실패 → 무시 */ }
+  // 2) 사진을 적당히 줄여서 미리보기/저장 (용량 절약)
   const reader = new FileReader();
   reader.onload = ev => {
-    // 사진을 적당히 줄여서 저장 (용량 절약)
     const img = new Image();
     img.onload = () => {
       const maxW = 1280;
@@ -408,7 +440,10 @@ document.getElementById('photoInput').addEventListener('change', e => {
     img.src = ev.target.result;
   };
   reader.readAsDataURL(file);
-});
+}
+
+document.getElementById('photoCam').addEventListener('change', e => handlePhotoFile(e.target.files[0]));
+document.getElementById('photoFile').addEventListener('change', e => handlePhotoFile(e.target.files[0]));
 
 async function saveRecord() {
   if (!currentPos) { alert('위치 정보가 없습니다. 위치권한을 켜고 다시 시도하세요.'); return; }
