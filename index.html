@@ -17,8 +17,19 @@
     padding: 12px 16px; display: flex; justify-content: space-between; align-items: center;
     box-shadow: 0 1px 4px rgba(0,0,0,0.15);
   }
-  .topbar h1 { font-size: 16px; font-weight: 700; }
-  .topbar .count { font-size: 13px; color: #666; }
+  .topbar h1 { font-size: 16px; font-weight: 700; white-space: nowrap; }
+  .topbar .count { font-size: 13px; color: #666; white-space: nowrap; }
+  .topbar .tb-left { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+  .topbar .tb-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  #projectSelect {
+    max-width: 42vw; padding: 6px 8px; border: 1px solid #ccc; border-radius: 8px;
+    font-size: 13px; font-family: inherit; background: #fff; color: #1a1a1a;
+  }
+  .newproj-btn {
+    border: 1px solid #1565c0; background: #fff; color: #1565c0; font-weight: 700;
+    font-size: 13px; padding: 6px 10px; border-radius: 8px; cursor: pointer; white-space: nowrap;
+  }
+  .newproj-btn:active { background: #e8f1fb; }
 
   /* 지도 컨트롤(줌/레이어)을 상단 바 아래로 내려 가림 방지 */
   .leaflet-top { top: 52px; }
@@ -121,8 +132,14 @@
 <body>
 
 <div class="topbar">
-  <h1>현장조사</h1>
-  <span class="count" id="count">조사: 0건</span>
+  <div class="tb-left">
+    <h1>현장조사</h1>
+    <select id="projectSelect" onchange="onProjectChange()" title="사업 선택"></select>
+  </div>
+  <div class="tb-right">
+    <span class="count" id="count">조사: 0건</span>
+    <button class="newproj-btn" onclick="newProject()" title="새 사업 만들기">＋사업</button>
+  </div>
 </div>
 
 <div id="map"></div>
@@ -305,18 +322,40 @@ let currentPos = null;     // 현재 GPS 좌표 {lat, lng}
 let currentPhoto = null;   // 등록 폼에서 선택한 사진 (dataURL)
 let photoLocated = false;  // 사진 EXIF 위치정보를 위치로 사용했는지
 
-// ---------- IndexedDB ----------
+// ---------- IndexedDB (계층: projects → records → photos[embedded]) ----------
 let db;
+let currentProjectId = null;   // 현재 선택된 사업 id
 const DB_NAME = 'fieldSurveyDB';
 const STORE = 'records';
+const PROJECTS = 'projects';
 
 function initDB() {
-  const req = indexedDB.open(DB_NAME, 1);
+  const req = indexedDB.open(DB_NAME, 2);
   req.onupgradeneeded = e => {
-    e.target.result.createObjectStore(STORE, { keyPath: 'id' });
+    const idb = e.target.result;
+    if (!idb.objectStoreNames.contains(STORE))    idb.createObjectStore(STORE, { keyPath: 'id' });
+    if (!idb.objectStoreNames.contains(PROJECTS)) idb.createObjectStore(PROJECTS, { keyPath: 'id' });
   };
-  req.onsuccess = e => { db = e.target.result; loadMarkers(); };
+  req.onsuccess = e => { db = e.target.result; migrateAndInit(); };
   req.onerror = () => alert('저장소를 열 수 없습니다.');
+}
+
+// 최초 실행/업그레이드 시: 기본 사업 보장 + 기존 조사 무손실 이관
+async function migrateAndInit() {
+  let projects = await getAllProjects();
+  if (projects.length === 0) {
+    await putProject({ id: 'default', name: '기본 사업', created: Date.now() });
+    projects = await getAllProjects();
+  }
+  // 사업이 없는 기존 조사는 기본 사업으로 귀속
+  const orphans = (await getAll()).filter(r => !r.projectId);
+  for (const r of orphans) { r.projectId = 'default'; await putRecord(r); }
+  // 현재 사업 결정 (저장된 선택 우선)
+  currentProjectId = localStorage.getItem('currentProjectId');
+  if (!projects.find(p => p.id === currentProjectId)) currentProjectId = projects[0].id;
+  localStorage.setItem('currentProjectId', currentProjectId);
+  renderProjectSelect(projects);
+  loadMarkers();
 }
 
 function getAll() {
@@ -337,13 +376,49 @@ function deleteRecord(id) {
     tx.onsuccess = () => res();
   });
 }
+// 사업(projects) 저장소 헬퍼
+function getAllProjects() {
+  return new Promise((res) => {
+    const tx = db.transaction(PROJECTS, 'readonly').objectStore(PROJECTS).getAll();
+    tx.onsuccess = () => res(tx.result || []);
+  });
+}
+function putProject(p) {
+  return new Promise((res) => {
+    const tx = db.transaction(PROJECTS, 'readwrite').objectStore(PROJECTS).put(p);
+    tx.onsuccess = () => res();
+  });
+}
+
+// ---------- 사업 선택/생성 ----------
+function renderProjectSelect(projects) {
+  const sel = document.getElementById('projectSelect');
+  sel.innerHTML = projects
+    .map(p => `<option value="${p.id}" ${p.id === currentProjectId ? 'selected' : ''}>${p.name}</option>`)
+    .join('');
+}
+function onProjectChange() {
+  currentProjectId = document.getElementById('projectSelect').value;
+  localStorage.setItem('currentProjectId', currentProjectId);
+  loadMarkers();
+}
+async function newProject() {
+  const name = prompt('새 사업 이름을 입력하세요');
+  if (!name || !name.trim()) return;
+  const id = 'p' + Date.now();
+  await putProject({ id, name: name.trim(), created: Date.now() });
+  currentProjectId = id;
+  localStorage.setItem('currentProjectId', id);
+  renderProjectSelect(await getAllProjects());
+  loadMarkers();
+}
 
 // ---------- 마커 표시 ----------
 let recordMarkers = [];
 async function loadMarkers() {
   recordMarkers.forEach(m => map.removeLayer(m));
   recordMarkers = [];
-  const all = await getAll();
+  const all = (await getAll()).filter(r => r.projectId === currentProjectId);
   document.getElementById('count').textContent = '조사: ' + all.length + '건';
   all.forEach(r => {
     const m = L.circleMarker([r.lat, r.lng], {
@@ -449,6 +524,7 @@ async function saveRecord() {
   if (!currentPos) { alert('위치 정보가 없습니다. 위치권한을 켜고 다시 시도하세요.'); return; }
   const rec = {
     id: Date.now().toString(),
+    projectId: currentProjectId,
     time: Date.now(),
     lat: currentPos.lat,
     lng: currentPos.lng,
@@ -464,7 +540,7 @@ async function saveRecord() {
 
 // ---------- 목록 ----------
 async function openList() {
-  const all = (await getAll()).sort((a, b) => b.time - a.time);
+  const all = (await getAll()).filter(r => r.projectId === currentProjectId).sort((a, b) => b.time - a.time);
   const body = document.getElementById('listBody');
   if (all.length === 0) {
     body.innerHTML = '<div class="empty">등록된 조사가 없습니다.</div>';
@@ -499,8 +575,8 @@ function openExport() { document.getElementById('exportOverlay').classList.add('
 function closeExport() { document.getElementById('exportOverlay').classList.remove('show'); }
 
 async function exportCSV() {
-  const all = (await getAll()).sort((a, b) => a.time - b.time);
-  if (!all.length) { alert('등록된 데이터가 없습니다.'); return; }
+  const all = (await getAll()).filter(r => r.projectId === currentProjectId).sort((a, b) => a.time - b.time);
+  if (!all.length) { alert('현재 사업에 등록된 데이터가 없습니다.'); return; }
   const header = ['id', '시각', '위도', '경도', '종류', '메모'];
   const rows = all.map(r => [
     r.id,
@@ -529,8 +605,13 @@ async function importJSON(e) {
   let records;
   try { records = JSON.parse(text); } catch { alert('JSON 파일을 읽을 수 없습니다.'); return; }
   if (!Array.isArray(records)) { alert('올바른 백업 파일이 아닙니다.'); return; }
-  if (!confirm(`${records.length}건을 복원합니다. 기존 데이터에 추가(덮어쓰기)됩니다. 계속할까요?`)) return;
-  for (const r of records) await putRecord(r);
+  if (!confirm(`${records.length}건을 현재 사업으로 복원합니다. 기존 데이터에 추가(덮어쓰기)됩니다. 계속할까요?`)) return;
+  // 사업 정보가 없거나 알 수 없는 조사는 현재 사업으로 귀속
+  const ids = new Set((await getAllProjects()).map(p => p.id));
+  for (const r of records) {
+    if (!r.projectId || !ids.has(r.projectId)) r.projectId = currentProjectId;
+    await putRecord(r);
+  }
   await loadMarkers();
   alert(`${records.length}건 복원 완료.`);
   closeExport();
@@ -538,8 +619,8 @@ async function importJSON(e) {
 
 async function exportPhotosZip() {
   const all = await getAll();
-  const withPhoto = all.filter(r => r.photo);
-  if (!withPhoto.length) { alert('저장된 사진이 없습니다.'); return; }
+  const withPhoto = all.filter(r => r.projectId === currentProjectId && r.photo);
+  if (!withPhoto.length) { alert('현재 사업에 저장된 사진이 없습니다.'); return; }
   // JSZip 지연 로드
   if (!window.JSZip) {
     await new Promise((res, rej) => {
