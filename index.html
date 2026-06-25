@@ -20,6 +20,14 @@
   .topbar h1 { font-size: 16px; font-weight: 700; }
   .topbar .count { font-size: 13px; color: #666; }
 
+  /* 지도 컨트롤(줌/레이어)을 상단 바 아래로 내려 가림 방지 */
+  .leaflet-top { top: 52px; }
+  .leaflet-control-layers { font-size: 13px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+  .leaflet-control-layers-expanded { padding: 8px 12px 8px 8px; }
+  .north-arrow { filter: drop-shadow(0 1px 3px rgba(0,0,0,0.35)); cursor: default; }
+  .leaflet-control-scale { margin-bottom: 8px !important; }
+  .leaflet-control-scale-line { font-size: 11px; padding: 2px 6px; }
+
   /* 하단 버튼 */
   .fab {
     position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
@@ -222,12 +230,71 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ---------- 지도 초기화 ----------
+const VWORLD_KEY = 'BBCD79DD-0859-3B41-A7C9-34898DA8FC43';
+// VWorld WMTS 타일 (z/y/x 순서). Base=일반, Satellite=위성, Hybrid=위성용 지명·경계 오버레이
+const vworldUrl = (layer, ext) =>
+  `https://api.vworld.kr/req/wmts/1.0.0/${VWORLD_KEY}/${layer}/{z}/{y}/{x}.${ext}`;
+
 const map = L.map('map', { zoomControl: false }).setView([36.5, 127.8], 7); // 대한민국 중심
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 19,
-  attribution: '© OpenStreetMap'
-}).addTo(map);
+
+// 배경 레이어
+const vBase   = L.tileLayer(vworldUrl('Base', 'png'),       { maxZoom: 19, attribution: 'VWorld' });
+const vSat    = L.tileLayer(vworldUrl('Satellite', 'jpeg'), { maxZoom: 19, attribution: 'VWorld' });
+const vHybrid = L.tileLayer(vworldUrl('Hybrid', 'png'),     { maxZoom: 19 }); // 위성 위 지명/경계
+const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                            { maxZoom: 19, attribution: 'Esri' }); // 키 불필요 위성(대체)
+const osm     = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                            { maxZoom: 19, attribution: '© OpenStreetMap' }); // 대체 일반
+
+// 기본: VWorld 일반지도
+vBase.addTo(map);
+
+// 일반/위성 전환 컨트롤
+const baseLayers = {
+  '일반지도 (VWorld)':     vBase,
+  '위성지도 (VWorld)':     vSat,
+  '위성 (Esri·키불필요)':  esriSat,
+  '일반 (OSM·대체)':       osm,
+};
+const overlays = { '위성 지명·경계': vHybrid };
+L.control.layers(baseLayers, overlays, { position: 'topright', collapsed: false }).addTo(map);
 L.control.zoom({ position: 'topright' }).addTo(map);
+
+// 축척 바 (뷰 이동·줌 시 자동 갱신)
+L.control.scale({ position: 'bottomleft', metric: true, imperial: false, maxWidth: 140 }).addTo(map);
+
+// 방위(북) 표시 — Leaflet은 지도를 회전시키지 않아 항상 위가 북쪽
+const NorthArrow = L.Control.extend({
+  options: { position: 'topleft' },
+  onAdd() {
+    const div = L.DomUtil.create('div', 'north-arrow');
+    div.title = '북(North)';
+    div.innerHTML = `<svg width="36" height="44" viewBox="0 0 36 44" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="18" cy="25" r="14" fill="#fff" stroke="#ccc" stroke-width="1"/>
+      <polygon points="18,12 23,27 18,23 13,27" fill="#d32f2f"/>
+      <polygon points="18,23 23,27 18,38 13,27" fill="#8a8a8a"/>
+      <text x="18" y="10" text-anchor="middle" font-size="10" font-weight="700" fill="#333">N</text>
+    </svg>`;
+    return div;
+  }
+});
+map.addControl(new NorthArrow());
+
+// VWorld 타일이 (도메인 미등록 / 로컬 file://) 안 뜨면 OSM으로 1회 자동 대체
+let vworldFailed = false;
+vBase.on('tileerror', () => {
+  if (vworldFailed) return;
+  vworldFailed = true;
+  if (map.hasLayer(vBase)) { map.removeLayer(vBase); osm.addTo(map); }
+  console.warn('VWorld 타일 로드 실패 → OSM 임시 대체. GitHub Pages 도메인 등록 후 정상 동작합니다.');
+});
+
+// 위성 계열 선택 시 지명·경계 오버레이 자동 동반
+map.on('baselayerchange', e => {
+  const sat = e.name.includes('위성');
+  if (sat && !map.hasLayer(vHybrid)) vHybrid.addTo(map);
+  if (!sat && map.hasLayer(vHybrid)) map.removeLayer(vHybrid);
+});
 
 let myMarker = null;       // 내 위치 마커
 let currentPos = null;     // 현재 GPS 좌표 {lat, lng}
