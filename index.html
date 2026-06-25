@@ -30,6 +30,8 @@
     font-size: 13px; padding: 6px 10px; border-radius: 8px; cursor: pointer; white-space: nowrap;
   }
   .newproj-btn:active { background: #e8f1fb; }
+  .delproj-btn { color: #d32f2f; border-color: #f3c0c0; padding: 6px 8px; }
+  .delproj-btn:active { background: #fdeaea; }
 
   /* 지도 컨트롤(줌/레이어)을 상단 바 아래로 내려 가림 방지 */
   .leaflet-top { top: 52px; }
@@ -181,6 +183,8 @@
   .list-item .del { color: #d32f2f; font-size: 13px; padding: 6px 8px; cursor: pointer; border: 1px solid #f3d2d2; border-radius: 6px; text-align: center; }
   .list-item input.chk { width: 22px; height: 22px; flex-shrink: 0; }
   .empty { text-align: center; color: #999; padding: 40px 0; font-size: 14px; }
+  /* 목록이 길어도 상단 닫기(✕)·하단 닫기 버튼이 항상 보이도록 내부 스크롤 */
+  #listBody { max-height: 56vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 
   /* 위치 지정 안내 배너 */
   #pickHint {
@@ -222,6 +226,7 @@
   <div class="tb-right">
     <span class="count" id="count">조사: 0건</span>
     <button class="newproj-btn" onclick="newProject()" title="새 사업 만들기">＋사업</button>
+    <button class="newproj-btn delproj-btn" onclick="deleteProject()" title="현재 사업 삭제">🗑</button>
   </div>
 </div>
 
@@ -589,6 +594,12 @@ function putProject(p) {
     tx.onsuccess = () => res();
   });
 }
+function deleteProjectRec(id) {
+  return new Promise((res) => {
+    const tx = db.transaction(PROJECTS, 'readwrite').objectStore(PROJECTS).delete(id);
+    tx.onsuccess = () => res();
+  });
+}
 
 // ========== 사업 선택/생성 ==========
 function renderProjectSelect(projects) {
@@ -611,6 +622,25 @@ async function newProject() {
   localStorage.setItem('currentProjectId', id);
   renderProjectSelect(await getAllProjects());
   loadMarkers();
+}
+async function deleteProject() {
+  const projects = await getAllProjects();
+  if (projects.length <= 1) {
+    alert('마지막 사업은 삭제할 수 없습니다. (최소 1개의 사업이 필요합니다)');
+    return;
+  }
+  const projName = document.getElementById('projectSelect').selectedOptions[0]?.text || '현재 사업';
+  const recs = (await getAll()).filter(r => r.projectId === currentProjectId);
+  if (!confirm(`[${projName}] 사업을 삭제합니다.${recs.length ? ` 이 사업의 조사 ${recs.length}건도 함께 삭제됩니다.` : ''} 계속할까요?`)) return;
+  if (recs.length && !confirm('정말 삭제할까요? 조사 데이터도 모두 삭제됩니다. (마지막 확인)')) return;
+  for (const r of recs) await deleteRecord(r.id);
+  await deleteProjectRec(currentProjectId);
+  const remaining = await getAllProjects();
+  currentProjectId = remaining[0].id;
+  localStorage.setItem('currentProjectId', currentProjectId);
+  renderProjectSelect(remaining);
+  await loadMarkers();
+  alert(`[${projName}] 사업 삭제 완료.`);
 }
 
 // ========== 마커 표시 ==========
