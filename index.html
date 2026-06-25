@@ -66,6 +66,12 @@
     background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.25);
     font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center;
   }
+  .bulk-btn {
+    position: fixed; bottom: 274px; right: 16px; z-index: 1000;
+    width: 48px; height: 48px; border-radius: 50%; border: none;
+    background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
 
   /* 내보내기 시트 */
   .export-option {
@@ -88,6 +94,11 @@
     background: #fff; width: 100%; max-height: 88vh; overflow-y: auto;
     border-radius: 20px 20px 0 0; padding: 20px 18px 32px;
   }
+  /* PC(넓은 화면): 폼을 가운데 카드로, 과도하게 커지지 않게 */
+  @media (min-width: 600px) {
+    .overlay { align-items: center; justify-content: center; }
+    .sheet { max-width: 480px; border-radius: 16px; max-height: 90vh; padding: 24px 24px 28px; }
+  }
   .sheet h2 { font-size: 18px; margin-bottom: 16px; }
   .field { margin-bottom: 16px; }
   .field label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 6px; color: #333; }
@@ -104,7 +115,7 @@
   }
   .photo-btn input { display: none; }
   .preview { margin-top: 10px; }
-  .preview img { width: 100%; border-radius: 10px; display: block; }
+  .preview img { width: 100%; max-height: 460px; object-fit: contain; background: #f2f2f2; border-radius: 10px; display: block; }
 
   .loc-btn {
     display: inline-block; padding: 9px 14px; border: 1px solid #1565c0;
@@ -131,7 +142,9 @@
   .list-item .info { flex: 1; min-width: 0; }
   .list-item .info .t { font-weight: 700; font-size: 15px; }
   .list-item .info .s { font-size: 12px; color: #888; margin-top: 3px; }
-  .list-item .del { color: #d32f2f; font-size: 13px; padding: 6px; }
+  .list-item .actions { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+  .list-item .edit { color: #1565c0; font-size: 13px; padding: 6px 8px; cursor: pointer; border: 1px solid #cfe0f5; border-radius: 6px; text-align: center; }
+  .list-item .del { color: #d32f2f; font-size: 13px; padding: 6px 8px; cursor: pointer; border: 1px solid #f3d2d2; border-radius: 6px; text-align: center; }
   .empty { text-align: center; color: #999; padding: 40px 0; font-size: 14px; }
 </style>
 </head>
@@ -150,10 +163,37 @@
 
 <div id="map"></div>
 
+<button class="bulk-btn" onclick="openBulk()" title="사진 일괄 등록">🗂️</button>
 <button class="export-btn" onclick="openExport()" title="내보내기">📤</button>
 <button class="list-btn" onclick="openList()" title="목록">📋</button>
 <button class="locate-btn" onclick="locateMe()" title="내 위치">📍</button>
 <button class="fab" onclick="openForm()">+ 조사 등록</button>
+
+<!-- 사진 일괄 등록 -->
+<div class="overlay" id="bulkOverlay">
+  <div class="sheet">
+    <h2>사진 일괄 등록 <span style="font-size:13px;font-weight:400;color:#888;">(사무실 정리용)</span></h2>
+    <div class="field">
+      <label>기본 구분 <span style="font-weight:400;font-size:12px;color:#888;">(등록 후 개별 수정 가능)</span></label>
+      <select id="bulkKind">
+        <option value="하천">하천</option>
+        <option value="소하천">소하천</option>
+        <option value="댐지점">댐지점</option>
+        <option value="구조물">구조물</option>
+        <option value="불법시설물">불법시설물</option>
+        <option value="기타">기타</option>
+      </select>
+    </div>
+    <label class="photo-btn">
+      🗂️ 사진 여러 장 선택 <span style="font-weight:400;font-size:12px;color:#5a7fb5;">(위치정보 있는 JPG)</span>
+      <input type="file" id="bulkInput" accept="image/*" multiple>
+    </label>
+    <div class="meta" id="bulkMeta">위치정보(EXIF)가 있는 사진은 자동으로 해당 위치에 등록됩니다.</div>
+    <div class="row-btns">
+      <button class="btn-cancel" onclick="closeBulk()">닫기</button>
+    </div>
+  </div>
+</div>
 
 <!-- 등록 폼 -->
 <div class="overlay" id="formOverlay">
@@ -328,6 +368,7 @@ let myMarker = null;       // 내 위치 마커
 let currentPos = null;     // 현재 GPS 좌표 {lat, lng}
 let currentPhoto = null;   // 등록 폼에서 선택한 사진 (dataURL)
 let photoLocated = false;  // 사진 EXIF 위치정보를 위치로 사용했는지
+let editId = null;         // 수정 중인 조사 id (없으면 신규 등록)
 
 // ---------- IndexedDB (계층: projects → records → photos[embedded]) ----------
 let db;
@@ -455,6 +496,8 @@ function locateMe() {
 
 // ---------- 등록 폼 ----------
 function openForm() {
+  editId = null;
+  document.querySelector('#formOverlay h2').textContent = '조사 등록';
   currentPhoto = null;
   photoLocated = false;
   document.getElementById('preview').innerHTML = '';
@@ -498,54 +541,99 @@ async function ensureExifr() {
   });
 }
 
+// 사진을 가로 maxW로 줄여 dataURL 반환 (용량 절약) — 단건/일괄 공용
+function resizePhoto(file, maxW = 1280, quality = 0.7) {
+  return new Promise(res => {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxW / img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        res(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+// 사진에서 EXIF GPS 추출 (없으면 null)
+async function readPhotoGps(file) {
+  try { await ensureExifr(); const g = await window.exifr.gps(file).catch(() => null);
+    return (g && typeof g.latitude === 'number') ? { lat: g.latitude, lng: g.longitude } : null;
+  } catch (_) { return null; }
+}
+
 async function handlePhotoFile(file) {
   if (!file) return;
-  // 1) 사진에 위치정보(EXIF GPS)가 있으면 조사 위치로 사용 (PC 업로드 시 유용)
-  try {
-    await ensureExifr();
-    const gps = await window.exifr.gps(file).catch(() => null);
-    if (gps && typeof gps.latitude === 'number') {
-      currentPos = { lat: gps.latitude, lng: gps.longitude };
-      photoLocated = true;
-      document.getElementById('formMeta').textContent =
-        `📷 사진 위치정보 사용: ${currentPos.lat.toFixed(6)}, ${currentPos.lng.toFixed(6)} (등록 시 기록됨)`;
-    }
-  } catch (_) { /* EXIF 없거나 읽기 실패 → 무시 */ }
-  // 2) 사진을 적당히 줄여서 미리보기/저장 (용량 절약)
-  const reader = new FileReader();
-  reader.onload = ev => {
-    const img = new Image();
-    img.onload = () => {
-      const maxW = 1280;
-      const scale = Math.min(1, maxW / img.width);
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width * scale;
-      canvas.height = img.height * scale;
-      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-      currentPhoto = canvas.toDataURL('image/jpeg', 0.7);
-      document.getElementById('preview').innerHTML = `<img src="${currentPhoto}">`;
-    };
-    img.src = ev.target.result;
-  };
-  reader.readAsDataURL(file);
+  const gps = await readPhotoGps(file);
+  if (gps) {
+    currentPos = gps; photoLocated = true;
+    document.getElementById('formMeta').textContent =
+      `📷 사진 위치정보 사용: ${gps.lat.toFixed(6)}, ${gps.lng.toFixed(6)} (등록 시 기록됨)`;
+  }
+  currentPhoto = await resizePhoto(file);
+  document.getElementById('preview').innerHTML = `<img src="${currentPhoto}">`;
 }
 
 document.getElementById('photoCam').addEventListener('change', e => handlePhotoFile(e.target.files[0]));
 document.getElementById('photoFile').addEventListener('change', e => handlePhotoFile(e.target.files[0]));
 
+// ---------- 사진 일괄 등록 (사무실 정리용) ----------
+function openBulk() {
+  document.getElementById('bulkInput').value = '';
+  document.getElementById('bulkMeta').textContent = '위치정보(EXIF)가 있는 사진은 자동으로 해당 위치에 등록됩니다. 구분·메모는 등록 후 개별 수정 가능합니다.';
+  document.getElementById('bulkOverlay').classList.add('show');
+}
+function closeBulk() { document.getElementById('bulkOverlay').classList.remove('show'); }
+
+document.getElementById('bulkInput').addEventListener('change', async e => {
+  const files = [...e.target.files];
+  if (!files.length) return;
+  const kind = document.getElementById('bulkKind').value;
+  const meta = document.getElementById('bulkMeta');
+  let ok = 0, noloc = 0;
+  for (let i = 0; i < files.length; i++) {
+    meta.textContent = `처리 중... ${i + 1} / ${files.length}`;
+    const f = files[i];
+    const gps = await readPhotoGps(f);
+    if (!gps) { noloc++; continue; }              // 위치정보 없는 사진은 제외(나중에 단건 등록 가능)
+    const photo = await resizePhoto(f);
+    await putRecord({
+      id: Date.now().toString() + '_' + i,
+      projectId: currentProjectId,
+      time: f.lastModified || Date.now(),
+      lat: gps.lat, lng: gps.lng,
+      kind, memo: '', photo
+    });
+    ok++;
+  }
+  await loadMarkers();
+  meta.textContent = `완료: ${ok}건 등록${noloc ? `, 위치정보 없는 ${noloc}건 제외` : ''}. 구분·메모는 목록에서 수정하세요.`;
+});
+
 async function saveRecord() {
-  if (!currentPos) { alert('위치 정보가 없습니다. 위치권한을 켜고 다시 시도하세요.'); return; }
-  const rec = {
-    id: Date.now().toString(),
-    projectId: currentProjectId,
-    time: Date.now(),
-    lat: currentPos.lat,
-    lng: currentPos.lng,
-    kind: document.getElementById('kindInput').value,
-    memo: document.getElementById('memoInput').value.trim(),
-    photo: currentPhoto
-  };
+  if (!currentPos) { alert('위치 정보가 없습니다. 사진(위치정보 있는 JPG)을 올리거나 📍 버튼으로 위치를 지정하세요.'); return; }
+  const kind = document.getElementById('kindInput').value;
+  const memo = document.getElementById('memoInput').value.trim();
+  let rec;
+  if (editId) {
+    // 수정: 기존 레코드 유지 + 변경분 반영
+    rec = (await getAll()).find(r => r.id === editId) || { id: editId, projectId: currentProjectId };
+    rec.kind = kind; rec.memo = memo;
+    rec.lat = currentPos.lat; rec.lng = currentPos.lng;
+    if (currentPhoto) rec.photo = currentPhoto; // 사진 새로 고른 경우만 교체
+  } else {
+    rec = {
+      id: Date.now().toString(), projectId: currentProjectId, time: Date.now(),
+      lat: currentPos.lat, lng: currentPos.lng, kind, memo, photo: currentPhoto
+    };
+  }
   await putRecord(rec);
+  editId = null;
   closeForm();
   await loadMarkers();
   map.setView([rec.lat, rec.lng], 17);
@@ -568,7 +656,10 @@ async function openList() {
           <div class="s">${r.memo || '(메모 없음)'}</div>
           <div class="s">${when}</div>
         </div>
-        <div class="del" onclick="event.stopPropagation(); removeItem('${r.id}')">삭제</div>
+        <div class="actions">
+          <div class="edit" onclick="event.stopPropagation(); editItem('${r.id}')">수정</div>
+          <div class="del" onclick="event.stopPropagation(); removeItem('${r.id}')">삭제</div>
+        </div>
       </div>`;
     }).join('');
   }
@@ -576,6 +667,26 @@ async function openList() {
 }
 function closeList() { document.getElementById('listOverlay').classList.remove('show'); }
 function goTo(lat, lng) { closeList(); map.setView([lat, lng], 18); }
+
+// 목록에서 구분·메모·사진 수정
+async function editItem(id) {
+  const rec = (await getAll()).find(r => r.id === id);
+  if (!rec) return;
+  closeList();
+  editId = id;
+  currentPhoto = rec.photo || null;
+  currentPos = { lat: rec.lat, lng: rec.lng };
+  photoLocated = false;
+  document.querySelector('#formOverlay h2').textContent = '조사 수정';
+  document.getElementById('preview').innerHTML = rec.photo ? `<img src="${rec.photo}">` : '';
+  document.getElementById('memoInput').value = rec.memo || '';
+  document.getElementById('kindInput').value = rec.kind || '하천';
+  document.getElementById('photoCam').value = '';
+  document.getElementById('photoFile').value = '';
+  document.getElementById('formMeta').textContent =
+    `수정 중 — 위치: ${rec.lat.toFixed(6)}, ${rec.lng.toFixed(6)} (사진을 새로 올리면 교체됩니다)`;
+  document.getElementById('formOverlay').classList.add('show');
+}
 async function removeItem(id) {
   if (!confirm('이 조사를 삭제할까요?')) return;
   await deleteRecord(id);
