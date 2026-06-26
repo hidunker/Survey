@@ -493,6 +493,22 @@
     </div>
     <input type="file" id="importInput" accept=".json" style="display:none" onchange="importJSON(event)">
 
+    <div class="section-cap" style="color:#1565c0;">카카오톡 공유 (파일 대신 텍스트)</div>
+    <div class="export-option" onclick="openTextExport()">
+      <div class="icon">📋</div>
+      <div>
+        <div class="label">텍스트로 내보내기 (카톡 공유용)</div>
+        <div class="desc">파일이 막히는 카톡에서 텍스트로 복사 → 대화창에 붙여넣어 전송</div>
+      </div>
+    </div>
+    <div class="export-option" onclick="openTextImport()">
+      <div class="icon">📝</div>
+      <div>
+        <div class="label">텍스트로 불러오기 (붙여넣기 복원)</div>
+        <div class="desc">받은 JSON 텍스트를 붙여넣어 복원 — 파일 선택 불필요</div>
+      </div>
+    </div>
+
     <div class="section-cap">데이터 삭제 (되돌릴 수 없음)</div>
     <div class="export-option danger" onclick="clearCurrentProject()">
       <div class="icon">🧹</div>
@@ -515,10 +531,21 @@
   </div>
 </div>
 
+<!-- 텍스트 공유 (카톡 대응: 파일 대신 복사/붙여넣기) -->
+<div class="overlay" id="textOverlay">
+  <div class="sheet">
+    <button class="sheet-close" onclick="closeTextShare()" title="닫기">✕</button>
+    <h2 id="textTitle">텍스트 공유</h2>
+    <div class="meta" id="textHint" style="margin-bottom:10px;"></div>
+    <textarea id="textArea" style="width:100%;min-height:200px;padding:10px;border:1px solid #ccc;border-radius:10px;font-size:12px;font-family:monospace;"></textarea>
+    <div class="row-btns" id="textBtns"></div>
+  </div>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ========== 공통 상수 ==========
-const BUILD = '2026-06-26i (내보내기 공유시트 우선 — 카톡 웹뷰 JSON 공유 가능)';
+const BUILD = '2026-06-26l (텍스트 복사/붙여넣기 공유 — 카톡 JSON 주고받기 대응)';
 console.log('현장조사 build:', BUILD);
 const KINDS = ['하천', '소하천', '댐지점', '구조물', '불법시설물', '기타'];
 function kindOptions(sel) {
@@ -1044,6 +1071,10 @@ async function handlePhotoFile(file) {
     showSelectedLocation(gps.lat, gps.lng);
     document.getElementById('formMeta').textContent =
       `📷 사진 위치정보 사용: ${gps.lat.toFixed(6)}, ${gps.lng.toFixed(6)} (등록 시 기록됨)`;
+  } else if (!currentPos) {
+    // 사진에 위치정보가 없음(안드로이드 갤러리는 EXIF GPS가 제거됨) → 수동 지정 안내
+    document.getElementById('formMeta').textContent =
+      '⚠ 사진에 위치정보가 없습니다. 📍현재위치(현장일 때) 또는 🗺️지도지정으로 위치를 지정하세요.';
   }
   try {
     currentPhoto = await withTimeout(resizePhoto(file), 25000);
@@ -1097,7 +1128,7 @@ async function saveRecord() {
 // ========== 사진 일괄 등록 ==========
 function openBulk() {
   document.getElementById('bulkInput').value = '';
-  document.getElementById('bulkMeta').textContent = '위치정보(EXIF)가 있으면 자동 배치, 없으면 지도 중심에 임시 등록(나중에 위치 수정). 모든 사진이 저장됩니다.';
+  document.getElementById('bulkMeta').textContent = '사진에 위치정보(EXIF)가 있으면 자동 배치, 없으면 지도 중심에 임시 등록(나중에 🗺️지도지정으로 위치 수정). 모든 사진이 저장됩니다.';
   const btn = document.getElementById('bulkDoneBtn');
   btn.textContent = '닫기'; btn.classList.remove('btn-done'); btn.classList.add('btn-cancel');
   document.getElementById('bulkOverlay').classList.add('show');
@@ -1109,7 +1140,7 @@ document.getElementById('bulkInput').addEventListener('change', async e => {
   if (!files.length) return;
   const kind = document.getElementById('bulkKind').value;
   const meta = document.getElementById('bulkMeta');
-  const center = map.getCenter();   // 위치정보 없는 사진의 임시 배치 위치
+  const center = map.getCenter();   // 위치정보 없는 사진의 임시 배치 위치(나중에 지도지정으로 수정)
   let ok = 0, noloc = 0, photoFail = 0, exifDiag = '';
   const savedPts = [];   // 저장된 좌표 모음 → 완료 후 지도를 그쪽으로 이동(점이 화면 밖이라 안 보이는 문제 해결)
   for (let i = 0; i < files.length; i++) {
@@ -1117,7 +1148,7 @@ document.getElementById('bulkInput').addEventListener('change', async e => {
     await new Promise(r => setTimeout(r, 0));   // 화면 갱신 양보(진행률이 실제로 보이도록)
     const f = files[i];
 
-    // 1) 위치: EXIF GPS 우선, 없거나 시간초과면 지도 중심에 임시 배치(버리지 않음)
+    // 1) 위치: EXIF GPS 우선, 없으면 지도 중심에 임시 배치(버리지 않음 → 나중에 지도지정으로 수정)
     let lat = center.lat, lng = center.lng, locNote = '⚠위치없음(지도중심 임시·수정요망)';
     try {
       const gps = await withTimeout(readPhotoGps(f), 12000).catch(() => null);
@@ -1166,8 +1197,8 @@ document.getElementById('bulkInput').addEventListener('change', async e => {
     (photoFail ? `, 사진 변환 실패 ${photoFail}건(원본 미지원)` : '') + '.';
   if (noloc) {
     msg += `<br><br>📍 <b>위치없음 진단</b>: ${exifDiag || '확인불가'}` +
-      `<br>안드로이드 크롬·삼성인터넷은 사진 선택 시 개인정보 보호로 <b>위치(GPS)를 제거</b>할 수 있습니다(카카오톡은 보존).` +
-      `<br><b>해결책</b>: ① 카카오톡 링크로 열어 업로드 / ② 현장에선 📍현재위치로 단건 등록 / ③ PC에서 업로드 / ④ 목록에서 각 사진을 🗺️지도지정으로 위치 수정.`;
+      `<br>안드로이드 크롬·삼성인터넷은 사진 선택 시 개인정보 보호로 <b>EXIF 위치(GPS)를 제거</b>합니다(웹에서 복구 불가).` +
+      `<br><b>위치 입력</b>: 목록에서 각 사진을 🗺️지도지정으로 수정. (원본 위치 보존: PC 업로드 또는 카카오톡으로 열기)`;
   }
   meta.innerHTML = msg;
   // 완료 버튼 강조
@@ -1426,6 +1457,69 @@ async function importJSON(e) {
   await loadMarkers();
   alert(`${records.length}건 복원 완료.`);
   closeExport();
+}
+
+// ----- 텍스트 공유 (카톡 대응: 파일이 막혀도 복사/붙여넣기로 주고받기) -----
+function closeTextShare() { document.getElementById('textOverlay').classList.remove('show'); }
+async function openTextExport() {
+  const all = (await getAll()).filter(r => r.projectId === currentProjectId);
+  if (!all.length) { alert('현재 사업에 내보낼 데이터가 없습니다.'); return; }
+  // 사진 포함 여부 — 사진은 용량이 커서 카톡 붙여넣기가 어려움. 기본은 위치·메모만(가볍고 확실).
+  const withPhoto = confirm('사진도 포함할까요?\n\n[확인] 사진 포함 (용량 큼 — 소량일 때만, 카톡에서 잘릴 수 있음)\n[취소] 위치·메모만 (가볍고 확실 — 권장)');
+  const data = withPhoto ? all : all.map(r => ({ ...r, photo: null }));
+  const json = JSON.stringify(data);
+  const ta = document.getElementById('textArea');
+  ta.value = json; ta.readOnly = true;
+  document.getElementById('textTitle').textContent = '📋 텍스트로 내보내기 (카톡 공유용)';
+  document.getElementById('textHint').innerHTML =
+    `아래 내용을 <b>📋복사</b> 후 카카오톡 대화창에 붙여넣어 보내세요.<br>` +
+    `${all.length}건 · 약 ${Math.round(json.length / 1024)}KB · ${withPhoto ? '<b>사진 포함</b>(길면 크롬에서 JSON 파일 사용 권장)' : '위치·메모만(사진 제외)'}`;
+  document.getElementById('textBtns').innerHTML =
+    `<button class="btn-cancel" onclick="closeTextShare()">닫기</button>` +
+    `<button class="btn-primary" onclick="copyTextArea()">📋 복사</button>`;
+  document.getElementById('exportOverlay').classList.remove('show');
+  document.getElementById('textOverlay').classList.add('show');
+}
+function openTextImport() {
+  const ta = document.getElementById('textArea');
+  ta.value = ''; ta.readOnly = false; ta.placeholder = '여기에 받은 JSON 텍스트를 붙여넣으세요';
+  document.getElementById('textTitle').textContent = '📝 텍스트로 불러오기 (붙여넣기 복원)';
+  document.getElementById('textHint').innerHTML =
+    '카카오톡 등에서 받은 JSON 텍스트를 아래에 <b>붙여넣고</b> [복원]을 누르세요. 현재 사업에 추가됩니다.';
+  document.getElementById('textBtns').innerHTML =
+    `<button class="btn-cancel" onclick="closeTextShare()">닫기</button>` +
+    `<button class="btn-primary" onclick="importFromText()">복원</button>`;
+  document.getElementById('exportOverlay').classList.remove('show');
+  document.getElementById('textOverlay').classList.add('show');
+}
+async function copyTextArea() {
+  const ta = document.getElementById('textArea');
+  try {
+    await navigator.clipboard.writeText(ta.value);
+    alert('복사됐습니다. 카카오톡 대화창에 붙여넣어 보내세요.');
+  } catch (_) {
+    ta.focus(); ta.select();
+    try {
+      const ok = document.execCommand('copy');
+      alert(ok ? '복사됐습니다. 카카오톡에 붙여넣어 보내세요.' : '자동 복사 실패 — 텍스트를 길게 눌러 전체 선택 후 복사하세요.');
+    } catch (_) { alert('자동 복사 실패 — 텍스트를 길게 눌러 전체 선택 후 복사하세요.'); }
+  }
+}
+async function importFromText() {
+  const text = document.getElementById('textArea').value.trim();
+  if (!text) { alert('붙여넣은 내용이 없습니다.'); return; }
+  let records;
+  try { records = JSON.parse(text); } catch { alert('JSON 형식이 아닙니다. 받은 텍스트 전체를 정확히 붙여넣었는지 확인하세요.'); return; }
+  if (!Array.isArray(records)) { alert('올바른 백업 텍스트가 아닙니다.'); return; }
+  if (!confirm(`${records.length}건을 현재 사업으로 복원합니다. 기존 데이터에 추가됩니다. 계속할까요?`)) return;
+  const ids = new Set((await getAllProjects()).map(p => p.id));
+  for (const r of records) {
+    if (!r.projectId || !ids.has(r.projectId)) r.projectId = currentProjectId;
+    await putRecord(r);
+  }
+  await loadMarkers();
+  closeTextShare();
+  alert(`${records.length}건 복원 완료.`);
 }
 
 async function exportPhotosZip() {
