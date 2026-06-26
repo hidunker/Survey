@@ -518,7 +518,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ========== 공통 상수 ==========
-const BUILD = '2026-06-26g (좌표 Number 수용·진단표시 + 위치없는 기록 수정가능)';
+const BUILD = '2026-06-26h (EXIF 위치누락 원인 진단 + 안드로이드 사진선택 위치제거 안내)';
 console.log('현장조사 build:', BUILD);
 const KINDS = ['하천', '소하천', '댐지점', '구조물', '불법시설물', '기타'];
 function kindOptions(sel) {
@@ -1007,6 +1007,18 @@ async function readPhotoGps(file) {
     return (g && typeof g.latitude === 'number') ? { lat: g.latitude, lng: g.longitude } : null;
   } catch (_) { return null; }
 }
+// 위치없음 원인 진단: GPS 외 다른 EXIF(촬영일/기기)가 있으면 "위치만 제거됨"(안드로이드 사진선택 정책)으로 판별
+async function diagnoseExif(file) {
+  try {
+    await ensureExifr();
+    const d = await withTimeout(window.exifr.parse(file).catch(() => null), 12000).catch(() => null);
+    if (!d) return 'EXIF 자체 없음(스크린샷·캡처·편집본·카톡재전송 등일 가능성)';
+    if (typeof d.latitude === 'number') return 'GPS 있음';
+    if (d.DateTimeOriginal || d.CreateDate || d.Make || d.Model)
+      return '촬영정보(날짜·기기)는 있으나 위치만 없음 → 안드로이드 사진선택 시 위치 제거 정책일 가능성 큼';
+    return 'EXIF에 위치·촬영정보 없음';
+  } catch (_) { return '진단 실패'; }
+}
 // 어떤 비동기 작업도 정해진 시간 안에 끝나게 강제 (무한 대기로 인한 멈춤 방지)
 function withTimeout(promise, ms) {
   return Promise.race([
@@ -1098,7 +1110,7 @@ document.getElementById('bulkInput').addEventListener('change', async e => {
   const kind = document.getElementById('bulkKind').value;
   const meta = document.getElementById('bulkMeta');
   const center = map.getCenter();   // 위치정보 없는 사진의 임시 배치 위치
-  let ok = 0, noloc = 0, photoFail = 0;
+  let ok = 0, noloc = 0, photoFail = 0, exifDiag = '';
   const savedPts = [];   // 저장된 좌표 모음 → 완료 후 지도를 그쪽으로 이동(점이 화면 밖이라 안 보이는 문제 해결)
   for (let i = 0; i < files.length; i++) {
     meta.textContent = `처리 중... ${i + 1} / ${files.length}`;
@@ -1110,7 +1122,7 @@ document.getElementById('bulkInput').addEventListener('change', async e => {
     try {
       const gps = await withTimeout(readPhotoGps(f), 12000).catch(() => null);
       if (gps) { lat = gps.lat; lng = gps.lng; locNote = ''; }
-      else noloc++;
+      else { noloc++; if (!exifDiag) exifDiag = await diagnoseExif(f).catch(() => ''); }
     } catch (_) { noloc++; }
 
     // 2) 사진: 리사이즈 → 실패(HEIC 등)하면 원본 base64라도 보존
@@ -1149,9 +1161,15 @@ document.getElementById('bulkInput').addEventListener('change', async e => {
     } catch (_) {}
   }
 
-  meta.textContent = `✅ 완료: 총 ${ok}건 저장` +
+  let msg = `✅ 완료: 총 ${ok}건 저장` +
     (noloc ? `, 그중 위치없음 ${noloc}건(지도 중심에 임시 배치 → 목록/지도에서 위치 수정)` : '') +
     (photoFail ? `, 사진 변환 실패 ${photoFail}건(원본 미지원)` : '') + '.';
+  if (noloc) {
+    msg += `<br><br>📍 <b>위치없음 진단</b>: ${exifDiag || '확인불가'}` +
+      `<br>안드로이드 크롬·삼성인터넷은 사진 선택 시 개인정보 보호로 <b>위치(GPS)를 제거</b>할 수 있습니다(카카오톡은 보존).` +
+      `<br><b>해결책</b>: ① 카카오톡 링크로 열어 업로드 / ② 현장에선 📍현재위치로 단건 등록 / ③ PC에서 업로드 / ④ 목록에서 각 사진을 🗺️지도지정으로 위치 수정.`;
+  }
+  meta.innerHTML = msg;
   // 완료 버튼 강조
   const btn = document.getElementById('bulkDoneBtn');
   btn.textContent = `✅ 완료 — 닫기 (저장 ${ok}건)`;
