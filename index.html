@@ -518,7 +518,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ========== 공통 상수 ==========
-const BUILD = '2026-06-26f (divIcon 마커 + GPS fallback)';
+const BUILD = '2026-06-26g (좌표 Number 수용·진단표시 + 위치없는 기록 수정가능)';
 console.log('현장조사 build:', BUILD);
 const KINDS = ['하천', '소하천', '댐지점', '구조물', '불법시설물', '기타'];
 function kindOptions(sel) {
@@ -746,11 +746,13 @@ async function loadMarkers() {
   recordMarkers.forEach(m => map.removeLayer(m));
   recordMarkers = [];
   const all = (await getAll()).filter(r => r.projectId === currentProjectId);
-  document.getElementById('count').textContent = '조사: ' + all.length + '건';
+  let drawn = 0, badLoc = 0;
   all.forEach(r => {
-    // 좌표가 깨진 기록 한 건 때문에 전체 렌더(+하천선)가 중단되지 않도록 가드
-    if (typeof r.lat !== 'number' || typeof r.lng !== 'number' || isNaN(r.lat) || isNaN(r.lng)) return;
-    const m = L.marker([r.lat, r.lng], { icon: createMarkerIcon() }).addTo(map);
+    // 좌표를 Number로 변환해 수용(문자열 좌표도 처리). 무효하면 카운트만 하고 skip
+    const la = Number(r.lat), ln = Number(r.lng);
+    if (!isFinite(la) || !isFinite(ln)) { badLoc++; return; }
+    drawn++;
+    const m = L.marker([la, ln], { icon: createMarkerIcon() }).addTo(map);
     const when = new Date(r.time).toLocaleString('ko-KR');
     const img = r.photo
       ? `<img src="${r.photo}" style="width:160px;border-radius:6px;display:block;margin-top:6px;cursor:pointer;" onclick="openPhotoView('${r.id}')" title="클릭하면 크게 보기">`
@@ -763,6 +765,8 @@ async function loadMarkers() {
     m.bindPopup(`<b>${r.kind}</b><br>${r.memo || '(메모 없음)'}<br><small>${when}</small>${img}${actions}`);
     recordMarkers.push(m);
   });
+  document.getElementById('count').textContent =
+    `조사: ${all.length}건` + (badLoc ? ` · 지도표시 ${drawn} · ⚠위치없음 ${badLoc}` : '');
   await loadFeatures();
 }
 
@@ -1119,16 +1123,18 @@ document.getElementById('bulkInput').addEventListener('change', async e => {
     }
 
     // 3) 저장: 어떤 경우에도 기록은 반드시 만든다(사진 못 만들어도 위치/시각은 남김)
-    //    putRecord에도 시간제한 → 저장이 멈춰도(용량초과 등) 루프가 다음으로 진행되어 완료에 도달
+    //    좌표를 Number로 확정 + 무효 시 지도중심 폴백 (lat/lng 누락 저장 방지)
+    let La = Number(lat), Ln = Number(lng);
+    if (!isFinite(La) || !isFinite(Ln)) { La = Number(center.lat); Ln = Number(center.lng); locNote = '⚠위치없음(지도중심 임시·수정요망)'; }
     try {
       await withTimeout(putRecord({
         id: Date.now().toString() + '_' + i,
         projectId: currentProjectId,
         time: f.lastModified || Date.now(),
-        lat, lng, kind, memo: locNote, photo
+        lat: La, lng: Ln, kind, memo: locNote, photo
       }), 15000);
       ok++;
-      savedPts.push([lat, lng]);
+      savedPts.push([La, Ln]);
     } catch (err) {
       console.warn('저장 실패:', f && f.name, err);
     }
@@ -1240,7 +1246,10 @@ async function editItem(id) {
   closeList();
   editId = id;
   currentPhoto = rec.photo || null;
-  currentPos = { lat: rec.lat, lng: rec.lng };
+  // 좌표가 깨진(누락) 기록도 수정창이 열리도록 방어 — toFixed 호출 전 유효성 확인
+  const la = Number(rec.lat), ln = Number(rec.lng);
+  const hasLoc = isFinite(la) && isFinite(ln);
+  currentPos = hasLoc ? { lat: la, lng: ln } : null;
   photoLocated = false;
   clearSelectedLocation();
   document.getElementById('locConfirm').style.display = 'none';
@@ -1250,8 +1259,10 @@ async function editItem(id) {
   document.getElementById('kindInput').value = rec.kind || '하천';
   document.getElementById('photoCam').value = '';
   document.getElementById('photoFile').value = '';
-  document.getElementById('formMeta').textContent =
-    `수정 중 — 위치: ${rec.lat.toFixed(6)}, ${rec.lng.toFixed(6)} (사진을 새로 올리면 교체, 🗺️로 위치 변경 가능)`;
+  document.getElementById('formMeta').textContent = hasLoc
+    ? `수정 중 — 위치: ${la.toFixed(6)}, ${ln.toFixed(6)} (사진을 새로 올리면 교체, 🗺️로 위치 변경 가능)`
+    : '⚠ 이 기록은 위치 정보가 없습니다. 🗺️ 지도에서 위치 지정으로 위치를 추가한 뒤 저장하세요.';
+  if (hasLoc) map.setView([la, ln], Math.max(map.getZoom(), 16));
   document.getElementById('formOverlay').classList.add('show');
 }
 async function removeItem(id) {
