@@ -518,7 +518,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ========== 공통 상수 ==========
-const BUILD = '2026-06-26e (일괄 업로드 후 마커 영역으로 지도 이동)';
+const BUILD = '2026-06-26f (divIcon 마커 + GPS fallback)';
 console.log('현장조사 build:', BUILD);
 const KINDS = ['하천', '소하천', '댐지점', '구조물', '불법시설물', '기타'];
 function kindOptions(sel) {
@@ -534,8 +534,7 @@ const VWORLD_KEY = 'BBCD79DD-0859-3B41-A7C9-34898DA8FC43';
 const vworldUrl = (layer, ext) =>
   `https://api.vworld.kr/req/wmts/1.0.0/${VWORLD_KEY}/${layer}/{z}/{y}/{x}.${ext}`;
 
-// preferCanvas: true — 안드로이드 크롬/삼성인터넷에서 circleMarker(SVG)가 안 그려지는 문제 방지(Canvas 렌더)
-const map = L.map('map', { zoomControl: false, preferCanvas: true }).setView([36.5, 127.8], 7); // 대한민국 중심
+const map = L.map('map', { zoomControl: false }).setView([36.5, 127.8], 7); // 대한민국 중심
 
 const vBase   = L.tileLayer(vworldUrl('Base', 'png'),       { maxZoom: 19, attribution: 'VWorld' });
 const vSat    = L.tileLayer(vworldUrl('Satellite', 'jpeg'), { maxZoom: 19, attribution: 'VWorld' });
@@ -583,14 +582,19 @@ vBase.on('tileerror', () => {
   console.warn('VWorld 타일 로드 실패 → OSM 임시 대체. GitHub Pages 도메인 등록 후 정상 동작합니다.');
 });
 
-// 배경에 따라 마커 가시색 결정 (위성=식생/물/토양 어디서나 보이는 고대비색)
+// 배경에 따라 마커 가시색 결정 — divIcon(DOM) 기반으로 Canvas/SVG 렌더러 의존 제거
+// (circleMarker Canvas 렌더가 안드로이드 일괄 추가 시 flush 안 되는 문제 근본 해결)
 let isSatellite = false;
-function markerStyle() {
-  return isSatellite
-    ? { radius: 9, color: '#ffffff', fillColor: '#ff2d95', fillOpacity: 0.95, weight: 2 } // 위성: 자홍+흰테두리
-    : { radius: 9, color: '#2e7d32', fillColor: '#43a047', fillOpacity: 0.9, weight: 2 };   // 일반: 초록
+function createMarkerIcon() {
+  const bg  = isSatellite ? '#ff2d95' : '#43a047';
+  const bdr = isSatellite ? '#ffffff' : '#2e7d32';
+  return L.divIcon({
+    className: '',
+    html: `<div style="width:18px;height:18px;border-radius:50%;background:${bg};border:2.5px solid ${bdr};box-shadow:0 1px 4px rgba(0,0,0,0.45);"></div>`,
+    iconSize: [18, 18], iconAnchor: [9, 9], popupAnchor: [0, -9]
+  });
 }
-function applyMarkerStyles() { recordMarkers.forEach(m => m.setStyle(markerStyle())); }
+function applyMarkerStyles() { recordMarkers.forEach(m => m.setIcon(createMarkerIcon())); }
 
 map.on('baselayerchange', e => {
   const sat = e.name.includes('위성');
@@ -746,7 +750,7 @@ async function loadMarkers() {
   all.forEach(r => {
     // 좌표가 깨진 기록 한 건 때문에 전체 렌더(+하천선)가 중단되지 않도록 가드
     if (typeof r.lat !== 'number' || typeof r.lng !== 'number' || isNaN(r.lat) || isNaN(r.lng)) return;
-    const m = L.circleMarker([r.lat, r.lng], markerStyle()).addTo(map);
+    const m = L.marker([r.lat, r.lng], { icon: createMarkerIcon() }).addTo(map);
     const when = new Date(r.time).toLocaleString('ko-KR');
     const img = r.photo
       ? `<img src="${r.photo}" style="width:160px;border-radius:6px;display:block;margin-top:6px;cursor:pointer;" onclick="openPhotoView('${r.id}')" title="클릭하면 크게 보기">`
@@ -799,17 +803,24 @@ async function removeFeature(id) {
 }
 
 // ========== 내 위치 ==========
-function locateMe() {
-  if (!navigator.geolocation) { alert('이 기기는 위치를 지원하지 않습니다.'); return; }
+// enableHighAccuracy:true 실패 시 false로 재시도 (삼성인터넷 등에서 high-accuracy 권한만 거부하는 케이스 대응)
+function geolocate(onSuccess, onFail) {
+  if (!navigator.geolocation) { onFail('이 기기/브라우저는 위치를 지원하지 않습니다.'); return; }
   navigator.geolocation.getCurrentPosition(
+    onSuccess,
+    () => navigator.geolocation.getCurrentPosition(onSuccess, e => onFail(e.message), { enableHighAccuracy: false, timeout: 12000 }),
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+}
+function locateMe() {
+  geolocate(
     pos => {
       currentPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
       map.setView([currentPos.lat, currentPos.lng], 17);
       if (myMarker) map.removeLayer(myMarker);
       myMarker = L.marker([currentPos.lat, currentPos.lng]).addTo(map).bindPopup('내 위치');
     },
-    err => alert('위치를 가져올 수 없습니다.\n(GPS·위치권한을 확인하세요)\n' + err.message),
-    { enableHighAccuracy: true, timeout: 10000 }
+    msg => alert('위치를 가져올 수 없습니다.\n\n📱 삼성 인터넷: 설정 → 사이트 권한 → 위치 → 이 사이트 허용\n🔵 크롬: 주소창 자물쇠 → 위치 → 허용\n\n' + msg)
   );
 }
 
@@ -861,13 +872,12 @@ document.getElementById('locConfirm').addEventListener('click', () => {
 });
 
 function useCurrentLocation() {
-  if (!navigator.geolocation) { alert('이 기기/브라우저는 위치를 지원하지 않습니다.'); return; }
   document.getElementById('formMeta').textContent = '📍 위치 가져오는 중...';
-  navigator.geolocation.getCurrentPosition(
+  geolocate(
     pos => setPickedLocation(pos.coords.latitude, pos.coords.longitude, '📍 현재 위치'),
-    err => { document.getElementById('formMeta').textContent =
-      '⚠ 위치를 가져오지 못했습니다. (PC는 사진 업로드 또는 🗺️ 지도지정을 사용하세요) ' + err.message; },
-    { enableHighAccuracy: true, timeout: 10000 }
+    msg => { document.getElementById('formMeta').textContent =
+      '⚠ 위치를 가져오지 못했습니다. PC는 🗺️ 지도지정을 사용하세요.\n' +
+      '📱 삼성 인터넷: 설정 → 사이트 권한 → 위치 허용 / 🔵 크롬: 주소창 자물쇠 → 위치 허용\n' + msg; }
   );
 }
 
