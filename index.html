@@ -518,7 +518,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ========== 공통 상수 ==========
-const BUILD = '2026-06-26h (EXIF 위치누락 원인 진단 + 안드로이드 사진선택 위치제거 안내)';
+const BUILD = '2026-06-26i (내보내기 공유시트 우선 — 카톡 웹뷰 JSON 공유 가능)';
 console.log('현장조사 build:', BUILD);
 const KINDS = ['하천', '소하천', '댐지점', '구조물', '불법시설물', '기타'];
 function kindOptions(sel) {
@@ -1399,14 +1399,14 @@ async function exportCSV() {
     r.photo ? 'Y' : 'N'
   ]);
   const csv = '﻿' + [header, ...rows].map(r => r.join(',')).join('\r\n');
-  downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), '현장조사_' + dateTag() + '.csv');
+  await shareOrDownload(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), '현장조사_' + dateTag() + '.csv');
 }
 
 async function exportJSON() {
   const all = await getAll();
   if (!all.length) { alert('등록된 데이터가 없습니다.'); return; }
   const json = JSON.stringify(all, null, 2);
-  downloadBlob(new Blob([json], { type: 'application/json' }), '현장조사_백업_' + dateTag() + '.json');
+  await shareOrDownload(new Blob([json], { type: 'application/json' }), '현장조사_백업_' + dateTag() + '.json');
 }
 
 async function importJSON(e) {
@@ -1447,7 +1447,7 @@ async function exportPhotosZip() {
     zip.file(`${String(i + 1).padStart(3, '0')}_${dt}_${r.kind}.jpg`, base64, { base64: true });
   });
   const blob = await zip.generateAsync({ type: 'blob' });
-  downloadBlob(blob, '현장조사_사진_' + dateTag() + '.zip');
+  await shareOrDownload(blob, '현장조사_사진_' + dateTag() + '.zip');
 }
 
 // ----- 데이터 삭제 -----
@@ -1476,6 +1476,21 @@ async function clearAllData() {
   closeExport();
 }
 
+// 모바일·카카오톡 인앱브라우저는 파일 다운로드가 막히는 경우가 많아 '공유 시트' 우선 시도.
+// (카톡 웹뷰에서 JSON을 다운로드 폴더에서 못 찾던 문제 → 공유로 카톡·드라이브·메일에 바로 전송)
+async function shareOrDownload(blob, filename) {
+  try {
+    const file = new File([blob], filename, { type: blob.type || 'application/octet-stream' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: filename });
+      return;
+    }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return;   // 사용자가 공유를 취소함
+    // 그 외 공유 실패 → 아래 다운로드로 폴백
+  }
+  downloadBlob(blob, filename);
+}
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
