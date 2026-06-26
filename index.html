@@ -233,13 +233,14 @@
   /* 목록이 길어도 상단 닫기(✕)·하단 닫기 버튼이 항상 보이도록 내부 스크롤 */
   #listBody { max-height: 56vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 
-  /* 위치 지정 / 하천선 그리기 안내 배너 */
-  #pickHint, #drawHint {
+  /* 위치 지정 / 하천선 그리기 / 위치 확인 안내 배너 */
+  #pickHint, #drawHint, #locConfirm {
     position: fixed; top: 60px; left: 50%; transform: translateX(-50%); z-index: 1800;
     display: none; background: #1565c0; color: #fff; padding: 10px 16px; border-radius: 20px;
     font-size: 14px; font-weight: 600; box-shadow: 0 3px 10px rgba(0,0,0,0.3); white-space: nowrap;
   }
   #drawHint { background: #1e88e5; }
+  #locConfirm { background: #2e7d32; cursor: pointer; max-width: 92vw; white-space: normal; text-align: center; }
 
   /* 사진 확대 — 반화면 플로팅 패널 (모달 아님: 지도 조작 유지) */
   #photoPanel {
@@ -296,6 +297,7 @@
 <div id="map"></div>
 <div id="pickHint">🗺️ 지도를 탭/클릭해 위치를 지정하세요 (취소: 위 닫기)</div>
 <div id="drawHint">🏞️ 하천선: 지도를 클릭해 경로를 이어 그리고 [완료]를 누르세요</div>
+<div id="locConfirm">📍 위치 지정됨 — 지도의 핀 확인 후 여기를 탭하여 등록 계속 ▶</div>
 
 <!-- 하천선 그리기 컨트롤 바 -->
 <div id="drawBar">
@@ -592,6 +594,7 @@ map.on('baselayerchange', e => {
 });
 
 let myMarker = null;
+let selMarker = null;   // 등록 위치 지정 시 지도에 보여줄 핀
 let currentPos = null;
 let currentPhoto = null;
 let photoLocated = false;
@@ -782,11 +785,24 @@ async function loadFeatures() {
       const pl = L.polyline(f.coords, { color: f.color || '#1e88e5', weight: 4, opacity: 0.85 }).addTo(map);
       pl.bindPopup(
         `<b>🏞️ ${f.name}</b><br><small>하천선 · ${f.coords.length}점</small><br>` +
-        `<span style="color:#d32f2f;cursor:pointer;font-weight:700;" onclick="removeFeature('${f.id}')">🗑 하천선 삭제</span>`
+        `<span style="color:#1565c0;cursor:pointer;font-weight:700;" onclick="renameFeature('${f.id}')">✏️ 이름 수정</span>` +
+        ` &nbsp;·&nbsp; ` +
+        `<span style="color:#d32f2f;cursor:pointer;font-weight:700;" onclick="removeFeature('${f.id}')">🗑 삭제</span>`
       );
+      // 라인을 탭/클릭하면 팝업이 바로 뜨도록(모바일에서 얇은 선도 누르기 쉽게 보조)
+      pl.on('click', () => pl.openPopup());
       featureLayers.push(pl);
     }
   });
+}
+async function renameFeature(id) {
+  const f = (await getAllFeatures()).find(x => x.id === id);
+  if (!f) return;
+  const name = prompt('하천선 이름을 수정하세요', f.name || '');
+  if (name === null) return;
+  f.name = name.trim() || '무명 하천선';
+  await putFeature(f);
+  await loadFeatures();
 }
 async function removeFeature(id) {
   if (!confirm('이 하천선을 삭제할까요?')) return;
@@ -822,20 +838,45 @@ function openForm() {
     '위치: 사진(위치정보 있는 JPG)·📍현재위치·🗺️지도지정 중 하나로 지정하세요. (사진 없이 메모만도 가능)';
   document.getElementById('photoCam').value = '';
   document.getElementById('photoFile').value = '';
+  clearSelectedLocation();
+  document.getElementById('locConfirm').style.display = 'none';
   document.getElementById('formOverlay').classList.add('show');
 }
-function closeForm() { document.getElementById('formOverlay').classList.remove('show'); }
+function closeForm() {
+  document.getElementById('formOverlay').classList.remove('show');
+  document.getElementById('locConfirm').style.display = 'none';
+  clearSelectedLocation();
+}
+
+// 선택한 위치를 지도에 핀으로 표시 (폰에서 어디인지 눈으로 확인)
+function showSelectedLocation(lat, lng) {
+  if (selMarker) map.removeLayer(selMarker);
+  selMarker = L.marker([lat, lng]).addTo(map).bindPopup('📍 등록할 위치').openPopup();
+  map.setView([lat, lng], Math.max(map.getZoom(), 16));
+}
+function clearSelectedLocation() {
+  if (selMarker) { map.removeLayer(selMarker); selMarker = null; }
+}
+// 위치 확정 공통 처리: 핀 표시 → 폼은 잠시 내리고 "확인 후 계속" 배너 노출
+function setPickedLocation(lat, lng, label) {
+  currentPos = { lat, lng };
+  photoLocated = false;
+  showSelectedLocation(lat, lng);
+  document.getElementById('formMeta').textContent =
+    `${label}: ${lat.toFixed(6)}, ${lng.toFixed(6)} (등록 시 기록됨)`;
+  document.getElementById('formOverlay').classList.remove('show');
+  document.getElementById('locConfirm').style.display = 'block';
+}
+document.getElementById('locConfirm').addEventListener('click', () => {
+  document.getElementById('locConfirm').style.display = 'none';
+  document.getElementById('formOverlay').classList.add('show');
+});
 
 function useCurrentLocation() {
   if (!navigator.geolocation) { alert('이 기기/브라우저는 위치를 지원하지 않습니다.'); return; }
   document.getElementById('formMeta').textContent = '📍 위치 가져오는 중...';
   navigator.geolocation.getCurrentPosition(
-    pos => {
-      currentPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      photoLocated = false;
-      document.getElementById('formMeta').textContent =
-        `📍 현재 위치: ${currentPos.lat.toFixed(6)}, ${currentPos.lng.toFixed(6)} (등록 시 기록됨)`;
-    },
+    pos => setPickedLocation(pos.coords.latitude, pos.coords.longitude, '📍 현재 위치'),
     err => { document.getElementById('formMeta').textContent =
       '⚠ 위치를 가져오지 못했습니다. (PC는 사진 업로드 또는 🗺️ 지도지정을 사용하세요) ' + err.message; },
     { enableHighAccuracy: true, timeout: 10000 }
@@ -851,11 +892,7 @@ function pickLocationOnMap() {
   map.once('click', e => {
     if (!pickingLocation) return;
     finishPick();
-    currentPos = { lat: e.latlng.lat, lng: e.latlng.lng };
-    photoLocated = false;
-    document.getElementById('formMeta').textContent =
-      `🗺️ 지정 위치: ${currentPos.lat.toFixed(6)}, ${currentPos.lng.toFixed(6)} (등록 시 기록됨)`;
-    document.getElementById('formOverlay').classList.add('show');
+    setPickedLocation(e.latlng.lat, e.latlng.lng, '🗺️ 지정 위치');
   });
 }
 function finishPick() {
@@ -941,20 +978,25 @@ async function ensureExifr() {
   });
 }
 function resizePhoto(file, maxW = 1280, quality = 0.7) {
-  return new Promise(res => {
+  return new Promise((res, rej) => {
     const reader = new FileReader();
     reader.onload = ev => {
       const img = new Image();
       img.onload = () => {
-        const scale = Math.min(1, maxW / img.width);
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width * scale;
-        canvas.height = img.height * scale;
-        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-        res(canvas.toDataURL('image/jpeg', quality));
+        try {
+          const scale = Math.min(1, maxW / img.width);
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width * scale;
+          canvas.height = img.height * scale;
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+          res(canvas.toDataURL('image/jpeg', quality));
+        } catch (err) { rej(err); }
       };
+      // ★ 디코딩 실패(HEIC 등 미지원·손상)해도 Promise를 반드시 끝내 루프가 멈추지 않게 함
+      img.onerror = () => rej(new Error('이미지 디코딩 불가(HEIC 등 미지원 형식일 수 있음)'));
       img.src = ev.target.result;
     };
+    reader.onerror = () => rej(new Error('파일 읽기 실패'));
     reader.readAsDataURL(file);
   });
 }
@@ -969,11 +1011,18 @@ async function handlePhotoFile(file) {
   const gps = await readPhotoGps(file);
   if (gps) {
     currentPos = gps; photoLocated = true;
+    showSelectedLocation(gps.lat, gps.lng);
     document.getElementById('formMeta').textContent =
       `📷 사진 위치정보 사용: ${gps.lat.toFixed(6)}, ${gps.lng.toFixed(6)} (등록 시 기록됨)`;
   }
-  currentPhoto = await resizePhoto(file);
-  document.getElementById('preview').innerHTML = `<img src="${currentPhoto}">`;
+  try {
+    currentPhoto = await resizePhoto(file);
+    document.getElementById('preview').innerHTML = `<img src="${currentPhoto}">`;
+  } catch (err) {
+    currentPhoto = null;
+    document.getElementById('preview').innerHTML = '';
+    alert('이 사진은 미리보기를 만들 수 없습니다(HEIC 등 미지원 형식일 수 있음).\n카메라 설정에서 사진 형식을 JPG로 바꾸거나 다른 사진을 사용하세요.');
+  }
 }
 document.getElementById('photoCam').addEventListener('change', e => handlePhotoFile(e.target.files[0]));
 document.getElementById('photoFile').addEventListener('change', e => handlePhotoFile(e.target.files[0]));
@@ -1024,24 +1073,33 @@ document.getElementById('bulkInput').addEventListener('change', async e => {
   if (!files.length) return;
   const kind = document.getElementById('bulkKind').value;
   const meta = document.getElementById('bulkMeta');
-  let ok = 0, noloc = 0;
+  let ok = 0, noloc = 0, failed = 0;
   for (let i = 0; i < files.length; i++) {
     meta.textContent = `처리 중... ${i + 1} / ${files.length}`;
     const f = files[i];
-    const gps = await readPhotoGps(f);
-    if (!gps) { noloc++; continue; }
-    const photo = await resizePhoto(f);
-    await putRecord({
-      id: Date.now().toString() + '_' + i,
-      projectId: currentProjectId,
-      time: f.lastModified || Date.now(),
-      lat: gps.lat, lng: gps.lng,
-      kind, memo: '', photo
-    });
-    ok++;
+    try {
+      const gps = await readPhotoGps(f);
+      if (!gps) { noloc++; continue; }
+      const photo = await resizePhoto(f);
+      await putRecord({
+        id: Date.now().toString() + '_' + i,
+        projectId: currentProjectId,
+        time: f.lastModified || Date.now(),
+        lat: gps.lat, lng: gps.lng,
+        kind, memo: '', photo
+      });
+      ok++;
+    } catch (err) {
+      // ★ 한 장이 실패(HEIC 디코딩 불가 등)해도 멈추지 않고 다음 사진으로 진행
+      failed++;
+      console.warn('일괄 업로드 실패:', f && f.name, err);
+    }
   }
   await loadMarkers();
-  meta.textContent = `✅ 완료: ${ok}건 등록${noloc ? `, 위치정보 없는 ${noloc}건 제외` : ''}. 구분·메모는 목록에서 수정하세요.`;
+  meta.textContent = `✅ 완료: ${ok}건 등록` +
+    (noloc ? `, 위치정보 없는 ${noloc}건 제외` : '') +
+    (failed ? `, 처리 실패 ${failed}건(HEIC 등 미지원 형식)` : '') +
+    '. 구분·메모는 목록에서 수정하세요.';
   // 완료 버튼 강조
   const btn = document.getElementById('bulkDoneBtn');
   btn.textContent = `✅ 완료 — 닫기 (${ok}건)`;
@@ -1126,6 +1184,8 @@ async function editItem(id) {
   currentPhoto = rec.photo || null;
   currentPos = { lat: rec.lat, lng: rec.lng };
   photoLocated = false;
+  clearSelectedLocation();
+  document.getElementById('locConfirm').style.display = 'none';
   document.getElementById('formTitle').textContent = '조사 수정';
   document.getElementById('preview').innerHTML = rec.photo ? `<img src="${rec.photo}">` : '';
   document.getElementById('memoInput').value = rec.memo || '';
