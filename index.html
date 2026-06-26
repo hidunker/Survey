@@ -768,7 +768,12 @@ async function loadMarkers() {
     const img = r.photo
       ? `<img src="${r.photo}" style="width:160px;border-radius:6px;display:block;margin-top:6px;cursor:pointer;" onclick="openPhotoView('${r.id}')" title="클릭하면 크게 보기">`
       : '';
-    m.bindPopup(`<b>${r.kind}</b><br>${r.memo || '(메모 없음)'}<br><small>${when}</small>${img}`);
+    const actions =
+      `<div style="margin-top:8px;display:flex;gap:6px;">` +
+      `<span style="flex:1;text-align:center;color:#1565c0;cursor:pointer;font-weight:700;border:1px solid #cfe0f5;border-radius:6px;padding:6px 0;" onclick="editFromMap('${r.id}')">✏️ 수정</span>` +
+      `<span style="flex:1;text-align:center;color:#d32f2f;cursor:pointer;font-weight:700;border:1px solid #f3d2d2;border-radius:6px;padding:6px 0;" onclick="removeFromMap('${r.id}')">🗑 삭제</span>` +
+      `</div>`;
+    m.bindPopup(`<b>${r.kind}</b><br>${r.memo || '(메모 없음)'}<br><small>${when}</small>${img}${actions}`);
     recordMarkers.push(m);
   });
   await loadFeatures();
@@ -1125,6 +1130,18 @@ function editFromPhoto() {
   const id = photoViewId;
   closePhotoView();
   if (id) { cameFromList = false; editItem(id); }
+}
+
+// 지도 마커 팝업에서 바로 수정/삭제 (저장·삭제 후 목록 대신 지도에 머무름)
+function editFromMap(id) {
+  map.closePopup();
+  editItem(id);   // 목록이 닫힌 상태이므로 cameFromList=false → 저장 후 지도 유지
+}
+async function removeFromMap(id) {
+  if (!confirm('이 조사를 삭제할까요?')) return;
+  map.closePopup();
+  await deleteRecord(id);
+  await loadMarkers();
 }
 
 // ========== 목록 ==========
