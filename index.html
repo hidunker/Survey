@@ -272,7 +272,11 @@
     <h2>현장조사 시스템</h2>
     <div class="sub">허가된 사용자만 이용할 수 있습니다.</div>
     <input type="text" id="loginId" placeholder="아이디" autocomplete="off" autocapitalize="off" spellcheck="false">
-    <input type="password" id="loginPw" placeholder="비밀번호" autocomplete="off">
+    <div style="position:relative;">
+      <input type="password" id="loginPw" placeholder="비밀번호" autocomplete="off" style="padding-right:48px;">
+      <button type="button" id="pwToggle" onclick="togglePw()"
+        style="position:absolute;right:10px;top:50%;transform:translateY(-50%);border:none;background:none;font-size:18px;cursor:pointer;padding:4px;">👁</button>
+    </div>
     <div class="err" id="loginErr"></div>
     <button onclick="tryLogin()">입장</button>
   </div>
@@ -1348,9 +1352,13 @@ function startApp() {
   vBase.addTo(map);   // 이때부터 지도 타일 호출 시작
   initDB();
 }
+function togglePw() {
+  const input = document.getElementById('loginPw');
+  input.type = input.type === 'password' ? 'text' : 'password';
+}
 function tryLogin() {
   const id = document.getElementById('loginId').value.trim();
-  const pw = document.getElementById('loginPw').value;
+  const pw = document.getElementById('loginPw').value.trim();
   if (id === AUTH.id && pw === AUTH.pw) {
     sessionStorage.setItem('fs_auth', '1');   // 같은 탭 세션 동안만 유지(ID 자동저장 안 함)
     document.getElementById('loginOverlay').style.display = 'none';
