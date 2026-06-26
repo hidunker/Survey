@@ -518,7 +518,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ========== 공통 상수 ==========
-const BUILD = '2026-06-26c (일괄업로드 무중단·전량저장)';
+const BUILD = '2026-06-26d (안드로이드 크롬 마커 Canvas 렌더 + IndexedDB 멈춤 방지)';
 console.log('현장조사 build:', BUILD);
 const KINDS = ['하천', '소하천', '댐지점', '구조물', '불법시설물', '기타'];
 function kindOptions(sel) {
@@ -534,7 +534,8 @@ const VWORLD_KEY = 'BBCD79DD-0859-3B41-A7C9-34898DA8FC43';
 const vworldUrl = (layer, ext) =>
   `https://api.vworld.kr/req/wmts/1.0.0/${VWORLD_KEY}/${layer}/{z}/{y}/{x}.${ext}`;
 
-const map = L.map('map', { zoomControl: false }).setView([36.5, 127.8], 7); // 대한민국 중심
+// preferCanvas: true — 안드로이드 크롬/삼성인터넷에서 circleMarker(SVG)가 안 그려지는 문제 방지(Canvas 렌더)
+const map = L.map('map', { zoomControl: false, preferCanvas: true }).setView([36.5, 127.8], 7); // 대한민국 중심
 
 const vBase   = L.tileLayer(vworldUrl('Base', 'png'),       { maxZoom: 19, attribution: 'VWorld' });
 const vSat    = L.tileLayer(vworldUrl('Satellite', 'jpeg'), { maxZoom: 19, attribution: 'VWorld' });
@@ -643,68 +644,42 @@ async function migrateAndInit() {
   loadMarkers();
 }
 
-function getAll() {
-  return new Promise((res) => {
-    const tx = db.transaction(STORE, 'readonly').objectStore(STORE).getAll();
-    tx.onsuccess = () => res(tx.result || []);
+// ★ 모든 IndexedDB 헬퍼는 onerror를 갖는다.
+//   (onerror가 없으면 저장/조회 실패 시 onsuccess가 안 불려 Promise가 영원히 pending →
+//    일괄 업로드 루프 등이 그 자리에서 멈춤. 갤24 크롬/삼성인터넷 멈춤 원인 차단)
+function idbRead(store, op) {
+  return new Promise((res, rej) => {
+    try {
+      const r = op(db.transaction(store, 'readonly').objectStore(store));
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error || new Error(store + ' 조회 실패'));
+    } catch (err) { rej(err); }
   });
 }
-function putRecord(rec) {
-  return new Promise((res) => {
-    const tx = db.transaction(STORE, 'readwrite').objectStore(STORE).put(rec);
-    tx.onsuccess = () => res();
+function idbWrite(store, op) {
+  return new Promise((res, rej) => {
+    try {
+      const os = db.transaction(store, 'readwrite').objectStore(store);
+      const r = op(os);
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error || new Error(store + ' 저장 실패'));
+    } catch (err) { rej(err); }
   });
 }
-function deleteRecord(id) {
-  return new Promise((res) => {
-    const tx = db.transaction(STORE, 'readwrite').objectStore(STORE).delete(id);
-    tx.onsuccess = () => res();
-  });
-}
-function clearStore(name) {
-  return new Promise((res) => {
-    const tx = db.transaction(name, 'readwrite').objectStore(name).clear();
-    tx.onsuccess = () => res();
-  });
-}
-function getAllProjects() {
-  return new Promise((res) => {
-    const tx = db.transaction(PROJECTS, 'readonly').objectStore(PROJECTS).getAll();
-    tx.onsuccess = () => res(tx.result || []);
-  });
-}
-function putProject(p) {
-  return new Promise((res) => {
-    const tx = db.transaction(PROJECTS, 'readwrite').objectStore(PROJECTS).put(p);
-    tx.onsuccess = () => res();
-  });
-}
-function deleteProjectRec(id) {
-  return new Promise((res) => {
-    const tx = db.transaction(PROJECTS, 'readwrite').objectStore(PROJECTS).delete(id);
-    tx.onsuccess = () => res();
-  });
-}
+function getAll()            { return idbRead(STORE, os => os.getAll()).then(v => v || []); }
+function putRecord(rec)      { return idbWrite(STORE, os => os.put(rec)); }
+function deleteRecord(id)    { return idbWrite(STORE, os => os.delete(id)); }
+function clearStore(name)    { return idbWrite(name, os => os.clear()); }
+function getAllProjects()    { return idbRead(PROJECTS, os => os.getAll()).then(v => v || []); }
+function putProject(p)       { return idbWrite(PROJECTS, os => os.put(p)); }
+function deleteProjectRec(id){ return idbWrite(PROJECTS, os => os.delete(id)); }
 // ----- 도형(features) -----
 function getAllFeatures() {
-  return new Promise((res) => {
-    if (!db.objectStoreNames.contains(FEATURES)) { res([]); return; }
-    const tx = db.transaction(FEATURES, 'readonly').objectStore(FEATURES).getAll();
-    tx.onsuccess = () => res(tx.result || []);
-  });
+  if (!db.objectStoreNames.contains(FEATURES)) return Promise.resolve([]);
+  return idbRead(FEATURES, os => os.getAll()).then(v => v || []);
 }
-function putFeature(f) {
-  return new Promise((res) => {
-    const tx = db.transaction(FEATURES, 'readwrite').objectStore(FEATURES).put(f);
-    tx.onsuccess = () => res();
-  });
-}
-function deleteFeature(id) {
-  return new Promise((res) => {
-    const tx = db.transaction(FEATURES, 'readwrite').objectStore(FEATURES).delete(id);
-    tx.onsuccess = () => res();
-  });
-}
+function putFeature(f)       { return idbWrite(FEATURES, os => os.put(f)); }
+function deleteFeature(id)   { return idbWrite(FEATURES, os => os.delete(id)); }
 
 // ========== 사업 선택/생성 ==========
 function renderProjectSelect(projects) {
@@ -769,6 +744,8 @@ async function loadMarkers() {
   const all = (await getAll()).filter(r => r.projectId === currentProjectId);
   document.getElementById('count').textContent = '조사: ' + all.length + '건';
   all.forEach(r => {
+    // 좌표가 깨진 기록 한 건 때문에 전체 렌더(+하천선)가 중단되지 않도록 가드
+    if (typeof r.lat !== 'number' || typeof r.lng !== 'number' || isNaN(r.lat) || isNaN(r.lng)) return;
     const m = L.circleMarker([r.lat, r.lng], markerStyle()).addTo(map);
     const when = new Date(r.time).toLocaleString('ko-KR');
     const img = r.photo
@@ -1131,13 +1108,14 @@ document.getElementById('bulkInput').addEventListener('change', async e => {
     }
 
     // 3) 저장: 어떤 경우에도 기록은 반드시 만든다(사진 못 만들어도 위치/시각은 남김)
+    //    putRecord에도 시간제한 → 저장이 멈춰도(용량초과 등) 루프가 다음으로 진행되어 완료에 도달
     try {
-      await putRecord({
+      await withTimeout(putRecord({
         id: Date.now().toString() + '_' + i,
         projectId: currentProjectId,
         time: f.lastModified || Date.now(),
         lat, lng, kind, memo: locNote, photo
-      });
+      }), 15000);
       ok++;
     } catch (err) {
       console.warn('저장 실패:', f && f.name, err);
@@ -1469,6 +1447,8 @@ function startApp() {
   if (appStarted) return;
   appStarted = true;
   vBase.addTo(map);   // 이때부터 지도 타일 호출 시작
+  // 로그인 오버레이가 사라진 뒤 지도 크기 재계산(일부 안드로이드 크롬에서 초기 렌더 안정화)
+  setTimeout(() => map.invalidateSize(), 200);
   initDB();
 }
 function togglePw(visible) {
