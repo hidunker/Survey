@@ -321,7 +321,7 @@
 <div id="map"></div>
 <div id="cadastralNote" style="display:none;position:fixed;left:8px;bottom:60px;z-index:1100;background:rgba(183,28,28,0.92);color:#fff;font-size:11px;font-weight:700;padding:5px 9px;border-radius:6px;max-width:62vw;box-shadow:0 1px 4px rgba(0,0,0,0.3);line-height:1.35;">⚠ 지적도=참고용 · 성과품은 지자체 취득 지적 사용</div>
 <div id="pickHint">🗺️ 지도를 탭/클릭해 위치를 지정하세요 (취소: 위 닫기)</div>
-<div id="drawHint">🏞️ 하천선: 지도를 클릭해 경로를 이어 그리고 [완료]를 누르세요</div>
+<div id="drawHint">🏞️ 선형(하천·도로 등): 지도를 클릭해 경로를 이어 그리고 [완료]를 누르세요</div>
 <div id="locConfirm">📍 위치 지정됨 — 지도의 핀 확인 후 여기를 탭하여 등록 계속 ▶</div>
 
 <!-- 하천선 그리기 컨트롤 바 -->
@@ -332,7 +332,7 @@
   <button class="d-ok" onclick="finishDrawRiver()">완료</button>
 </div>
 
-<button class="draw-btn" onclick="startDrawRiver()" title="하천선 그리기">🏞️</button>
+<button class="draw-btn" onclick="startDrawRiver()" title="선형 그리기 (하천·도로 등)">🏞️</button>
 <button class="bulk-btn" onclick="openBulk()" title="사진 일괄 등록">🗂️</button>
 <button class="export-btn" onclick="openExport()" title="내보내기·관리">📤</button>
 <button class="list-btn" onclick="openList()" title="목록">📋</button>
@@ -396,7 +396,7 @@
     </div>
 
     <div class="field" id="featureField" style="display:none;">
-      <label>귀속 하천선 <span style="font-weight:400;font-size:12px;color:#888;">(가까운 하천선에 자동으로 묶임 · 수정 가능)</span></label>
+      <label>귀속 선형(하천·도로 등) <span style="font-weight:400;font-size:12px;color:#888;">(가까운 선형에 자동으로 묶임 · 수정 가능)</span></label>
       <select id="featureInput" onchange="refreshAutoAttribution()"></select>
       <div class="meta" id="featureMeta"></div>
     </div>
@@ -550,7 +550,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ========== 공통 상수 ==========
-const BUILD = '2026-06-27c (목록 하천선별 그룹핑·메모 인라인수정 + 재분류 하천선 복사/중복방지 + 지적도 참고용 오버레이)';
+const BUILD = '2026-06-27d (선형 하천/도로/기타 일반화 + 위성 흰글로우·지적도 위성색보정)';
 console.log('현장조사 build:', BUILD);
 const KINDS = ['하천', '소하천', '댐지점', '구조물', '불법시설물', '기타'];
 function kindOptions(sel) {
@@ -596,6 +596,7 @@ const cadastral = L.tileLayer.wms(cadastralUrl, {
 });
 function onCadastralOn() {
   document.getElementById('cadastralNote').style.display = 'block';
+  applyCadastralStyle();   // 위성이면 흰계열 보정 적용
   if (!sessionStorage.getItem('cadastral_notified')) {
     sessionStorage.setItem('cadastral_notified', '1');
     alert('지적도(연속지적도)는 참고용입니다.\n\n' +
@@ -651,12 +652,20 @@ function createMarkerIcon() {
 }
 function applyMarkerStyles() { recordMarkers.forEach(m => m.setIcon(createMarkerIcon())); }
 
+// 지적도(WMS 래스터)는 노란 경계선이 위성 배경에서 잘 안 보임 → 위성일 때 타일에 필터로 흰계열 보정
+function applyCadastralStyle() {
+  if (!map.hasLayer(cadastral)) return;
+  const c = cadastral.getContainer && cadastral.getContainer();
+  if (c) c.style.filter = isSatellite ? 'grayscale(1) brightness(2.4) contrast(1.1)' : '';
+}
 map.on('baselayerchange', e => {
   const sat = e.name.includes('위성');
   isSatellite = sat;
   if (sat && !map.hasLayer(vHybrid)) vHybrid.addTo(map);
   if (!sat && map.hasLayer(vHybrid)) map.removeLayer(vHybrid);
   applyMarkerStyles();
+  applyCadastralStyle();
+  loadFeatures();            // 선형 위성 흰 글로우(halo) 재적용
 });
 
 let myMarker = null;
@@ -878,7 +887,7 @@ async function loadMarkers() {
     const when = new Date(r.time).toLocaleString('ko-KR');
     const feat = r.featureId ? featById.get(r.featureId) : null;
     const riverLine = feat
-      ? `<br><span style="color:#1565c0;">🏞️ ${feat.name}</span>${r.featureAmbiguous ? ' <span style="color:#e65100;">⚠갈래확인</span>' : ''}`
+      ? `<br><span style="color:#1565c0;">${featIcon(feat.category || '하천')} ${esc(feat.name)}</span>${r.featureAmbiguous ? ' <span style="color:#e65100;">⚠갈래확인</span>' : ''}`
       : '';
     const img = r.photo
       ? `<img src="${r.photo}" style="width:160px;border-radius:6px;display:block;margin-top:6px;cursor:pointer;" onclick="openPhotoView('${r.id}')" title="클릭하면 크게 보기">`
@@ -896,25 +905,38 @@ async function loadMarkers() {
   await loadFeatures();
 }
 
-// ========== 도형(하천선) 표시 ==========
+// ========== 선형 도형(하천선·도로선 등) 표시 ==========
+// 선형은 하천에 한정되지 않음 — 도로작업이면 도로선이 될 수 있음(category로 구분).
+function featIcon(cat)     { return cat === '도로' ? '🛣️' : cat === '기타' ? '📌' : '🏞️'; }
+function featTypeName(cat) { return cat === '도로' ? '도로선' : cat === '기타' ? '선형' : '하천선'; }
+function featColor(cat)    { return cat === '도로' ? '#fb8c00' : cat === '기타' ? '#8e24aa' : '#1e88e5'; }
+
 let featureLayers = [];
 async function loadFeatures() {
   featureLayers.forEach(l => map.removeLayer(l));
   featureLayers = [];
   const feats = (await getAllFeatures()).filter(f => f.projectId === currentProjectId);
-  // 하천선별 귀속 조사 건수 집계
+  // 선형별 귀속 조사 건수 집계
   const recs = (await getAll()).filter(r => r.projectId === currentProjectId);
   const cntById = {};
   recs.forEach(r => { if (r.featureId) cntById[r.featureId] = (cntById[r.featureId] || 0) + 1; });
   feats.forEach(f => {
     if (f.type === 'line' && Array.isArray(f.coords) && f.coords.length >= 2) {
-      const pl = L.polyline(f.coords, { color: f.color || '#1e88e5', weight: 4, opacity: 0.85 }).addTo(map);
+      const cat = f.category || '하천';
+      const color = f.color || featColor(cat);
+      // ★ 위성 배경에서는 색선이 잘 안 보임 → 흰색 외부 글로우(halo)를 선 아래에 깐다(살짝)
+      if (isSatellite) {
+        const halo = L.polyline(f.coords, { color: '#ffffff', weight: 7, opacity: 0.55, lineJoin: 'round', lineCap: 'round', interactive: false }).addTo(map);
+        featureLayers.push(halo);
+      }
+      const pl = L.polyline(f.coords, { color, weight: 4, opacity: 0.95, lineJoin: 'round', lineCap: 'round' }).addTo(map);
       const n = cntById[f.id] || 0;
       const bundle = n
         ? `<span style="color:#1565c0;cursor:pointer;font-weight:700;" onclick="openFeatureRecords('${f.id}')">📋 귀속 조사 ${n}건 보기</span><br>`
         : `<span style="color:#888;">귀속된 조사 없음</span><br>`;
       pl.bindPopup(
-        `<b>🏞️ ${f.name}</b><br><small>하천선 · ${f.coords.length}점</small><br>` +
+        `<b>${featIcon(cat)} ${esc(f.name)}</b><br>` +
+        `<small>${featTypeName(cat)} · ${f.coords.length}점 · <span style="color:#1565c0;cursor:pointer;" onclick="cycleFeatureCategory('${f.id}')">유형변경</span></small><br>` +
         bundle +
         `<span style="color:#1565c0;cursor:pointer;font-weight:700;" onclick="renameFeature('${f.id}')">✏️ 이름 수정</span>` +
         ` &nbsp;·&nbsp; ` +
@@ -926,6 +948,20 @@ async function loadFeatures() {
     }
   });
 }
+// 선형 유형 순환: 하천 → 도로 → 기타 → 하천 (색도 함께 변경, 사용자 지정색이 기본색일 때만)
+async function cycleFeatureCategory(id) {
+  const f = (await getAllFeatures()).find(x => x.id === id);
+  if (!f) return;
+  const order = ['하천', '도로', '기타'];
+  const cur = f.category || '하천';
+  const next = order[(order.indexOf(cur) + 1) % order.length];
+  // 색이 기본 팔레트값이면 새 유형 기본색으로 따라 변경(사용자가 따로 지정한 색은 보존)
+  if (!f.color || f.color === featColor(cur)) f.color = featColor(next);
+  f.category = next;
+  await putFeature(f);
+  map.closePopup();
+  await loadMarkers();   // 팝업·아이콘·그룹 태그 갱신
+}
 // 하천선 팝업 → 그 하천선에 귀속된 조사만 목록으로 표출
 function openFeatureRecords(featureId) {
   map.closePopup();
@@ -935,11 +971,11 @@ function openFeatureRecords(featureId) {
 async function renameFeature(id) {
   const f = (await getAllFeatures()).find(x => x.id === id);
   if (!f) return;
-  const name = prompt('하천선 이름을 수정하세요', f.name || '');
+  const name = prompt('선형 이름을 수정하세요', f.name || '');
   if (name === null) return;
-  f.name = name.trim() || '무명 하천선';
+  f.name = name.trim() || ('무명 ' + featTypeName(f.category || '하천'));
   await putFeature(f);
-  await loadMarkers();   // 마커 팝업의 하천명도 갱신되도록
+  await loadMarkers();   // 마커 팝업의 선형명도 갱신되도록
 }
 async function removeFeature(id) {
   if (!confirm('이 하천선을 삭제할까요? (귀속된 조사는 삭제되지 않고 귀속만 해제됩니다)')) return;
@@ -1071,11 +1107,15 @@ function onDrawClick(e) {
   drawPoints.push([e.latlng.lat, e.latlng.lng]);
   redrawDrawTemp();
 }
+let drawHalo = null;
 function redrawDrawTemp() {
   if (drawLine) { map.removeLayer(drawLine); drawLine = null; }
+  if (drawHalo) { map.removeLayer(drawHalo); drawHalo = null; }
   drawDots.forEach(d => map.removeLayer(d)); drawDots = [];
   if (drawPoints.length >= 2) {
-    drawLine = L.polyline(drawPoints, { color: '#1e88e5', weight: 4, dashArray: '6,7', opacity: 0.9 }).addTo(map);
+    if (isSatellite)   // 위성 배경에서 작도선이 묻히지 않게 흰 글로우
+      drawHalo = L.polyline(drawPoints, { color: '#ffffff', weight: 7, opacity: 0.55, interactive: false }).addTo(map);
+    drawLine = L.polyline(drawPoints, { color: '#1e88e5', weight: 4, dashArray: '6,7', opacity: 0.95 }).addTo(map);
   }
   drawPoints.forEach(p => drawDots.push(
     L.circleMarker(p, { radius: 5, color: '#fff', fillColor: '#1e88e5', fillOpacity: 1, weight: 2 }).addTo(map)
@@ -1084,6 +1124,7 @@ function redrawDrawTemp() {
 }
 function clearDrawTemp() {
   if (drawLine) { map.removeLayer(drawLine); drawLine = null; }
+  if (drawHalo) { map.removeLayer(drawHalo); drawHalo = null; }
   drawDots.forEach(d => map.removeLayer(d)); drawDots = [];
 }
 function undoDrawPoint() { drawPoints.pop(); redrawDrawTemp(); }
@@ -1096,17 +1137,21 @@ function cancelDraw() {
   map.getContainer().style.cursor = '';
 }
 async function finishDrawRiver() {
-  if (drawPoints.length < 2) { alert('하천선은 최소 2점 이상 찍어야 합니다.'); return; }
-  const name = prompt('하천선 이름을 입력하세요 (예: ○○천)');
+  if (drawPoints.length < 2) { alert('선형은 최소 2점 이상 찍어야 합니다.'); return; }
+  // 유형 선택(하천/도로/기타) — 도로작업이면 도로선이 될 수 있음
+  const t = prompt('선형 유형: 1=하천, 2=도로, 3=기타', '1');
+  if (t === null) return;   // 취소: 그리던 점 유지
+  const cat = t.trim() === '2' ? '도로' : t.trim() === '3' ? '기타' : '하천';
+  const name = prompt(`${featTypeName(cat)} 이름을 입력하세요 (예: ${cat === '도로' ? '○○로, 국도 ○호' : cat === '기타' ? '○○구간' : '○○천'})`);
   if (name === null) return;   // 취소: 그리던 점 유지
   await putFeature({
-    id: 'f' + Date.now(), projectId: currentProjectId, type: 'line',
-    name: (name.trim() || '무명 하천선'), coords: drawPoints.slice(),
-    color: '#1e88e5', created: Date.now()
+    id: 'f' + Date.now(), projectId: currentProjectId, type: 'line', category: cat,
+    name: (name.trim() || ('무명 ' + featTypeName(cat))), coords: drawPoints.slice(),
+    color: featColor(cat), created: Date.now()
   });
   cancelDraw();
-  await recomputeAuto();    // 새 하천선 반영 → 자동 귀속 기록 재계산
-  await loadMarkers();      // 마커 팝업의 하천명·라인 팝업 건수 갱신(loadFeatures 포함)
+  await recomputeAuto();    // 새 선형 반영 → 자동 귀속 기록 재계산
+  await loadMarkers();      // 마커 팝업의 선형명·라인 팝업 건수 갱신(loadFeatures 포함)
 }
 
 // 안내 배너 클릭 시 위치지정 취소하고 폼 복귀
@@ -1216,21 +1261,21 @@ async function handlePhotoFile(file) {
 document.getElementById('photoCam').addEventListener('change', e => handlePhotoFile(e.target.files[0]));
 document.getElementById('photoFile').addEventListener('change', e => handlePhotoFile(e.target.files[0]));
 
-// 폼의 '귀속 하천선' 드롭다운 채우기. selectedVal: 'auto' | featureId | '' (없음)
+// 폼의 '귀속 선형' 드롭다운 채우기. selectedVal: 'auto' | featureId | '' (없음)
 async function populateFeatureSelect(selectedVal) {
   const field = document.getElementById('featureField');
   const sel = document.getElementById('featureInput');
   const feats = (await getAllFeatures())
     .filter(f => f.projectId === currentProjectId && f.type === 'line');
-  if (!feats.length) {                       // 하천선이 없으면 귀속 UI 자체를 숨김
+  if (!feats.length) {                       // 선형이 없으면 귀속 UI 자체를 숨김
     field.style.display = 'none';
     document.getElementById('featureMeta').textContent = '';
     return;
   }
   field.style.display = 'block';
   sel.innerHTML =
-    `<option value="auto">자동 (가장 가까운 하천선)</option>` +
-    feats.map(f => `<option value="${f.id}">${f.name}</option>`).join('') +
+    `<option value="auto">자동 (가장 가까운 선형)</option>` +
+    feats.map(f => `<option value="${f.id}">${featIcon(f.category || '하천')} ${f.name}</option>`).join('') +
     `<option value="">없음 (귀속 안 함)</option>`;
   sel.value = (selectedVal === undefined ? 'auto' : selectedVal);
   if (sel.selectedIndex < 0) sel.value = 'auto';   // 삭제된 featureId 대비
@@ -1432,20 +1477,21 @@ let selectMode = false;
 let selectedIds = new Set();
 let listCache = [];
 let listFilterFeatureId = null;   // 하천선 귀속 필터(특정 하천선의 조사만 표시)
-let featNameById = {};            // 목록 행에 귀속 하천명 표시용
+let featNameById = {};            // 목록 행에 귀속 선형명 표시용
+let featCatById = {};             // 목록 행/그룹 헤더 아이콘(하천/도로/기타)용
 
 async function openList() {
   memoEditId = null;
   let recs = (await getAll()).filter(r => r.projectId === currentProjectId);
-  featNameById = {};
+  featNameById = {}; featCatById = {};
   (await getAllFeatures()).filter(f => f.projectId === currentProjectId)
-    .forEach(f => { featNameById[f.id] = f.name; });
+    .forEach(f => { featNameById[f.id] = f.name; featCatById[f.id] = f.category || '하천'; });
   const bar = document.getElementById('listFilterBar');
   if (listFilterFeatureId) {
     const f = (await getAllFeatures()).find(x => x.id === listFilterFeatureId);
     recs = recs.filter(r => r.featureId === listFilterFeatureId);
     document.getElementById('listFilterLabel').textContent =
-      `🏞️ ${f ? f.name : '하천선'} 귀속 조사 ${recs.length}건`;
+      `${f ? featIcon(f.category || '하천') : '🏞️'} ${f ? f.name : '선형'} 귀속 조사 ${recs.length}건`;
     bar.style.display = 'flex';
   } else {
     bar.style.display = 'none';
@@ -1493,7 +1539,7 @@ function listItemHTML(r) {
     ? `onclick="toggleSel('${r.id}')"`
     : `onclick="goTo(${r.lat},${r.lng})"`;
   const riverTag = r.featureId && featNameById[r.featureId]
-    ? ` <span style="color:#1565c0;font-weight:600;">· 🏞️ ${esc(featNameById[r.featureId])}</span>` : '';
+    ? ` <span style="color:#1565c0;font-weight:600;">· ${featIcon(featCatById[r.featureId] || '하천')} ${esc(featNameById[r.featureId])}</span>` : '';
   return `<div class="list-item" ${rowClick}>
     ${chk}
     ${thumb}
@@ -1529,7 +1575,7 @@ function renderList() {
   for (const k of keys) {
     const arr = groups.get(k).sort((a, b) => b.time - a.time);   // 그룹 내 최신순
     if (k) {
-      html += `<div class="group-head"><span>🏞️ ${esc(featNameById[k] || '하천선')}</span><span class="gcnt">${arr.length}건</span></div>`;
+      html += `<div class="group-head"><span>${featIcon(featCatById[k] || '하천')} ${esc(featNameById[k] || '선형')}</span><span class="gcnt">${arr.length}건</span></div>`;
     } else if (keys.length > 1) {
       html += `<div class="group-head unassigned"><span>📍 미귀속(가까운 하천선 없음/없음 지정)</span><span class="gcnt">${arr.length}건</span></div>`;
     }
