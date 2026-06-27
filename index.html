@@ -36,6 +36,11 @@
     background: #1565c0; color: #fff; font-size: 16px; font-weight: 700; cursor: pointer;
   }
   #loginOverlay button:active { background: #0d47a1; }
+  /* 로그인 화면 하단 개발자 마킹 (파란 바탕 영역) */
+  #loginOverlay .dev-mark {
+    position: absolute; bottom: 22px; left: 0; right: 0; text-align: center;
+    color: rgba(255,255,255,0.82); font-size: 12px; font-weight: 600; letter-spacing: .3px;
+  }
 
   /* 상단 바 */
   .topbar {
@@ -304,6 +309,7 @@
     <div class="err" id="loginErr"></div>
     <button onclick="tryLogin()">입장</button>
   </div>
+  <div class="dev-mark">개발: 수자원본부 댐수력 LJW</div>
 </div>
 
 <div class="topbar">
@@ -525,6 +531,26 @@
     </div>
     <input type="file" id="importInput" style="display:none" onchange="importJSON(event)">
 
+    <div class="section-cap" style="color:#1565c0;">참조 도형 레이어 (DXF / SHP) — 끄고켜기</div>
+    <div class="export-option" onclick="document.getElementById('dxfInput').click()">
+      <div class="icon">📐</div>
+      <div>
+        <div class="label">DXF 올리기 (설계도면)</div>
+        <div class="desc">업로드 시 원점 선택(5185 서부 / 5186 중부 / 5187 동부 / 5188 동해). 우측 레이어 목록에서 토글</div>
+      </div>
+    </div>
+    <input type="file" id="dxfInput" accept=".dxf" style="display:none" onchange="uploadDxf(this.files[0]); this.value=''">
+    <div class="export-option" onclick="document.getElementById('shpInput').click()">
+      <div class="icon">🗺️</div>
+      <div>
+        <div class="label">SHP 올리기 (.zip)</div>
+        <div class="desc">.shp/.dbf/.prj 가 담긴 zip — 좌표계(.prj) 자동 인식. 우측 레이어 목록에서 토글</div>
+      </div>
+    </div>
+    <input type="file" id="shpInput" accept=".zip" style="display:none" onchange="uploadShp(this.files[0]); this.value=''">
+    <div style="font-size:11px;color:#b71c1c;margin:2px 0 6px;">⚠ 개발단계 — 너무 무거운(수만 요소) DXF/SHP는 앱이 느려질 수 있어 지양 권장.</div>
+    <div id="overlayList" style="margin-bottom:8px;"></div>
+
     <div class="section-cap">데이터 삭제 (되돌릴 수 없음)</div>
     <div class="export-option danger" onclick="clearCurrentProject()">
       <div class="icon">🧹</div>
@@ -550,7 +576,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ========== 공통 상수 ==========
-const BUILD = '2026-06-27d (선형 하천/도로/기타 일반화 + 위성 흰글로우·지적도 위성색보정)';
+const BUILD = '2026-06-27e (DXF/SHP 참조레이어 업로드·토글 + 로그인 개발자마킹 + 지적 위성 가시성 강화)';
 console.log('현장조사 build:', BUILD);
 const KINDS = ['하천', '소하천', '댐지점', '구조물', '불법시설물', '기타'];
 function kindOptions(sel) {
@@ -610,7 +636,12 @@ cadastral.on('add', onCadastralOn);
 cadastral.on('remove', onCadastralOff);
 
 const overlays = { '위성 지명·경계': vHybrid, '지적도 (참고용·VWorld)': cadastral };
-L.control.layers(baseLayers, overlays, { position: 'topright', collapsed: false }).addTo(map);
+const layerControl = L.control.layers(baseLayers, overlays, { position: 'topright', collapsed: false }).addTo(map);
+
+// 참조 도형(DXF/SHP) 전용 pane — SVG 렌더러로 두어 위성에서 외곽선 글로우(CSS filter) 일괄 적용
+map.createPane('refShapes');
+map.getPane('refShapes').style.zIndex = 450;   // 마커(600)보다 아래, 타일(200)보다 위
+const refRenderer = L.svg({ pane: 'refShapes' });
 L.control.zoom({ position: 'topright' }).addTo(map);
 L.control.scale({ position: 'bottomleft', metric: true, imperial: false, maxWidth: 140 }).addTo(map);
 
@@ -656,7 +687,20 @@ function applyMarkerStyles() { recordMarkers.forEach(m => m.setIcon(createMarker
 function applyCadastralStyle() {
   if (!map.hasLayer(cadastral)) return;
   const c = cadastral.getContainer && cadastral.getContainer();
-  if (c) c.style.filter = isSatellite ? 'grayscale(1) brightness(2.4) contrast(1.1)' : '';
+  if (isSatellite) {
+    // 위성: 경계·글자를 진하고 선명하게 — 더 불투명 + 밝게(노랑→흰계열) + 검은 외곽선(글자 가독성)
+    cadastral.setOpacity(0.95);
+    if (c) c.style.filter = 'brightness(1.7) contrast(1.5) drop-shadow(0 0 1px #000) drop-shadow(0 0 1px #000)';
+  } else {
+    cadastral.setOpacity(0.55);
+    if (c) c.style.filter = '';
+  }
+}
+// 참조 도형(DXF/SHP) pane — 위성에서 검은 외곽선 글로우로 가시성 확보
+function applyRefShapeStyle() {
+  const p = map.getPane('refShapes');
+  if (p) p.style.filter = isSatellite
+    ? 'drop-shadow(0 0 1px rgba(0,0,0,0.95)) drop-shadow(0 0 1px rgba(0,0,0,0.95))' : '';
 }
 map.on('baselayerchange', e => {
   const sat = e.name.includes('위성');
@@ -665,7 +709,9 @@ map.on('baselayerchange', e => {
   if (!sat && map.hasLayer(vHybrid)) map.removeLayer(vHybrid);
   applyMarkerStyles();
   applyCadastralStyle();
+  applyRefShapeStyle();
   loadFeatures();            // 선형 위성 흰 글로우(halo) 재적용
+  loadOverlays();            // SHP 배경적응 색 재적용
 });
 
 let myMarker = null;
@@ -684,14 +730,16 @@ const DB_NAME = 'fieldSurveyDB';
 const STORE = 'records';
 const PROJECTS = 'projects';
 const FEATURES = 'features';   // 도형(하천선·댐구역·지점)
+const OVERLAYS = 'overlays';   // 참조 도형 레이어(DXF/SHP) — 토글용, 귀속 대상 아님
 
 function initDB() {
-  const req = indexedDB.open(DB_NAME, 3);
+  const req = indexedDB.open(DB_NAME, 4);
   req.onupgradeneeded = e => {
     const idb = e.target.result;
     if (!idb.objectStoreNames.contains(STORE))    idb.createObjectStore(STORE, { keyPath: 'id' });
     if (!idb.objectStoreNames.contains(PROJECTS)) idb.createObjectStore(PROJECTS, { keyPath: 'id' });
     if (!idb.objectStoreNames.contains(FEATURES)) idb.createObjectStore(FEATURES, { keyPath: 'id' });
+    if (!idb.objectStoreNames.contains(OVERLAYS)) idb.createObjectStore(OVERLAYS, { keyPath: 'id' });
   };
   req.onsuccess = e => { db = e.target.result; migrateAndInit(); };
   req.onerror = () => alert('저장소를 열 수 없습니다.');
@@ -710,6 +758,7 @@ async function migrateAndInit() {
   localStorage.setItem('currentProjectId', currentProjectId);
   renderProjectSelect(projects);
   loadMarkers();
+  loadOverlays();
 }
 
 // ★ 모든 IndexedDB 헬퍼는 onerror를 갖는다.
@@ -748,6 +797,13 @@ function getAllFeatures() {
 }
 function putFeature(f)       { return idbWrite(FEATURES, os => os.put(f)); }
 function deleteFeature(id)   { return idbWrite(FEATURES, os => os.delete(id)); }
+// ----- 참조 도형 레이어(overlays: DXF/SHP) -----
+function getAllOverlays() {
+  if (!db.objectStoreNames.contains(OVERLAYS)) return Promise.resolve([]);
+  return idbRead(OVERLAYS, os => os.getAll()).then(v => v || []);
+}
+function putOverlay(o)       { return idbWrite(OVERLAYS, os => os.put(o)); }
+function deleteOverlayRec(id){ return idbWrite(OVERLAYS, os => os.delete(id)); }
 
 // ========== 하천선 자동 귀속 (조사 → 가장 가까운 하천선) ==========
 // 핵심 효용: 장거리 하천(수십~100km) 조사에서 자료가 어느 하천 구간에 속하는지
@@ -824,6 +880,7 @@ function onProjectChange() {
   currentProjectId = document.getElementById('projectSelect').value;
   localStorage.setItem('currentProjectId', currentProjectId);
   loadMarkers();
+  loadOverlays();
 }
 async function newProject() {
   const name = prompt('새 사업 이름을 입력하세요');
@@ -859,12 +916,15 @@ async function deleteProject() {
   if (!confirm(`정말로 [${projName}] 사업을 삭제하시겠습니까?\n삭제된 자료는 되돌릴 수 없습니다. (마지막 확인)`)) return;
   for (const r of recs) await deleteRecord(r.id);
   for (const f of feats) await deleteFeature(f.id);
+  const ovs = (await getAllOverlays()).filter(o => o.projectId === currentProjectId);
+  for (const o of ovs) await deleteOverlayRec(o.id);
   await deleteProjectRec(currentProjectId);
   const remaining = await getAllProjects();
   currentProjectId = remaining[0].id;
   localStorage.setItem('currentProjectId', currentProjectId);
   renderProjectSelect(remaining);
   await loadMarkers();
+  await loadOverlays();
   alert(`[${projName}] 사업 삭제 완료.`);
 }
 
@@ -967,6 +1027,156 @@ function openFeatureRecords(featureId) {
   map.closePopup();
   listFilterFeatureId = featureId;
   openList();
+}
+
+// ========== 참조 도형 레이어 (DXF/SHP 업로드 → 끄고켜기) ==========
+// ⚠ 개발단계: 수만 엔티티의 무거운 DXF/SHP는 앱이 느려질 수 있어 지양 권장(명세 §10.10).
+//   라이브러리는 사용 시점에 esm.sh에서 지연 로드(검증 버전 고정).
+const PROJ_DEFS = {
+  '5185': '+proj=tmerc +lat_0=38 +lon_0=125 +k=1 +x_0=200000 +y_0=600000 +ellps=GRS80 +units=m +no_defs',
+  '5186': '+proj=tmerc +lat_0=38 +lon_0=127 +k=1 +x_0=200000 +y_0=600000 +ellps=GRS80 +units=m +no_defs',
+  '5187': '+proj=tmerc +lat_0=38 +lon_0=129 +k=1 +x_0=200000 +y_0=600000 +ellps=GRS80 +units=m +no_defs',
+  '5188': '+proj=tmerc +lat_0=38 +lon_0=131 +k=1 +x_0=200000 +y_0=600000 +ellps=GRS80 +units=m +no_defs'
+};
+async function ensureProj4() { if (!window.proj4) { const m = await import('https://esm.sh/proj4@2.20.9'); window.proj4 = m.default || m; } }
+async function ensureDxf()   { if (!window.DxfParser) { const m = await import('https://esm.sh/dxf-parser@1.1.2'); window.DxfParser = m.default || m; } }
+async function ensureShp()   { if (!window.shp) { const m = await import('https://esm.sh/shpjs@6.2.0'); window.shp = m.default || m; } }
+
+function intToHex(n) { if (n == null) return null; return '#' + (n & 0xFFFFFF).toString(16).padStart(6, '0'); }
+// TM(원점 def) 중심으로 원/호를 점열로 펼친 뒤 변환 (반지름 왜곡 없이 형상 보존). 각도=라디안.
+function arcPts(cx, cy, r, a0, a1, tr) {
+  let span = a1 - a0; if (span <= 0) span += Math.PI * 2;
+  const n = Math.max(8, Math.round(span / (Math.PI / 18)));   // ~10° 간격
+  const pts = [];
+  for (let i = 0; i <= n; i++) { const a = a0 + span * i / n; pts.push(tr(cx + r * Math.cos(a), cy + r * Math.sin(a))); }
+  return pts;
+}
+// DXF → 그릴 도형 배열({k:'line'|'poly'|'pt', pts:[[lat,lng]], color}). 좌표는 이미 WGS84로 변환.
+function dxfToShapes(dxf, srcDef) {
+  const layers = (dxf.tables && dxf.tables.layer && dxf.tables.layer.layers) || {};
+  const layerColor = {}; Object.entries(layers).forEach(([n, v]) => layerColor[n] = intToHex(v.color));
+  const tr = (x, y) => { const r = window.proj4(srcDef, 'WGS84', [x, y]); return [r[1], r[0]]; };
+  const colorOf = e => intToHex(e.color) || layerColor[e.layer] || '#ff3333';
+  const out = [];
+  for (const e of dxf.entities) {
+    try {
+      const col = colorOf(e);
+      if (e.type === 'LINE' && e.vertices && e.vertices.length >= 2) {
+        out.push({ k: 'line', pts: e.vertices.map(v => tr(v.x, v.y)), color: col });
+      } else if ((e.type === 'LWPOLYLINE' || e.type === 'POLYLINE') && e.vertices && e.vertices.length >= 2) {
+        out.push({ k: e.shape ? 'poly' : 'line', pts: e.vertices.map(v => tr(v.x, v.y)), color: col });
+      } else if (e.type === 'CIRCLE' && e.center) {
+        out.push({ k: 'poly', pts: arcPts(e.center.x, e.center.y, e.radius, 0, Math.PI * 2, tr), color: col });
+      } else if (e.type === 'ARC' && e.center) {
+        out.push({ k: 'line', pts: arcPts(e.center.x, e.center.y, e.radius, e.startAngle, e.endAngle, tr), color: col });
+      } else if (e.type === 'POINT' && e.position) {
+        out.push({ k: 'pt', pts: [tr(e.position.x, e.position.y)], color: col });
+      }
+    } catch (_) {}
+  }
+  return out;
+}
+
+let overlayCtrlLayers = {};      // overlayId → Leaflet layer
+let suppressOverlayPersist = false;
+function buildDxfLayer(shapes) {
+  const g = L.layerGroup();
+  (shapes || []).forEach(s => {
+    if (s.k === 'line') L.polyline(s.pts, { renderer: refRenderer, color: s.color, weight: 1.5, opacity: 0.95 }).addTo(g);
+    else if (s.k === 'poly') L.polygon(s.pts, { renderer: refRenderer, color: s.color, weight: 1.5, opacity: 0.95, fillOpacity: 0.12 }).addTo(g);
+    else if (s.k === 'pt') L.circleMarker(s.pts[0], { renderer: refRenderer, radius: 3, color: s.color, weight: 2, fillOpacity: 0.9 }).addTo(g);
+  });
+  return g;
+}
+function shpColor() { return isSatellite ? '#00e5ff' : '#14315e'; }   // 배경적응: 위성=시안 / 일반=남색(+pane 외곽선)
+function buildShpLayer(geojson) {
+  const col = shpColor();
+  return L.geoJSON(geojson, {
+    renderer: refRenderer,
+    style: () => ({ color: col, weight: 1.4, opacity: 0.95, fillColor: col, fillOpacity: 0.10 }),
+    pointToLayer: (f, latlng) => L.circleMarker(latlng, { renderer: refRenderer, radius: 3, color: col, weight: 2, fillOpacity: 0.9 })
+  });
+}
+async function loadOverlays() {
+  suppressOverlayPersist = true;
+  for (const id in overlayCtrlLayers) {
+    const lyr = overlayCtrlLayers[id];
+    layerControl.removeLayer(lyr);
+    if (map.hasLayer(lyr)) map.removeLayer(lyr);
+  }
+  overlayCtrlLayers = {};
+  const ovs = (await getAllOverlays()).filter(o => o.projectId === currentProjectId);
+  for (const o of ovs) {
+    const lyr = (o.kind === 'dxf') ? buildDxfLayer(o.shapes) : buildShpLayer(o.geojson);
+    lyr._overlayId = o.id;
+    overlayCtrlLayers[o.id] = lyr;
+    layerControl.addOverlay(lyr, `${o.kind === 'dxf' ? '📐' : '🗺️'} ${esc(o.name)}`);
+    if (o.visible !== false) lyr.addTo(map);
+  }
+  applyRefShapeStyle();
+  suppressOverlayPersist = false;
+}
+async function setOverlayVisible(id, v) {
+  if (suppressOverlayPersist) return;
+  const o = (await getAllOverlays()).find(x => x.id === id);
+  if (o && o.visible !== v) { o.visible = v; await putOverlay(o); }
+}
+map.on('overlayadd',    e => { if (e.layer && e.layer._overlayId) setOverlayVisible(e.layer._overlayId, true); });
+map.on('overlayremove', e => { if (e.layer && e.layer._overlayId) setOverlayVisible(e.layer._overlayId, false); });
+
+async function saveOverlay(o) {
+  const rec = { id: 'ov' + Date.now(), projectId: currentProjectId, visible: true, created: Date.now(), ...o };
+  const size = JSON.stringify(rec).length;
+  if (size > 5 * 1024 * 1024 &&
+      !confirm(`이 레이어가 큽니다(약 ${(size / 1048576).toFixed(1)}MB).\n개발단계에서는 무거운 DXF/SHP는 앱이 느려질 수 있어 지양 권장입니다.\n그래도 추가할까요?`)) return;
+  await putOverlay(rec);
+  await loadOverlays();
+  alert(`참조 레이어 추가됨: ${rec.name}\n(우측 레이어 목록에서 끄고켤 수 있습니다)`);
+}
+async function uploadDxf(file) {
+  if (!file) return;
+  const epsg = prompt('DXF 좌표 원점(GRS80 TM) 선택:\n5185=서부 / 5186=중부 / 5187=동부 / 5188=동해', '5186');
+  if (epsg === null) return;
+  const def = PROJ_DEFS[(epsg || '').trim()];
+  if (!def) { alert('5185 / 5186 / 5187 / 5188 중에서 선택하세요.'); return; }
+  try {
+    await ensureProj4(); await ensureDxf();
+    const Ctor = window.DxfParser.default || window.DxfParser;
+    const dxf = new Ctor().parseSync(await file.text());
+    const shapes = dxfToShapes(dxf, def);
+    if (!shapes.length) { alert('DXF에서 그릴 수 있는 도형(선/폴리라인/원/호/점)을 찾지 못했습니다.'); return; }
+    await saveOverlay({ kind: 'dxf', name: file.name.replace(/\.dxf$/i, ''), shapes, epsg: epsg.trim() });
+  } catch (err) { alert('DXF 처리 실패: ' + (err && err.message || err)); }
+}
+async function uploadShp(file) {
+  if (!file) return;
+  try {
+    await ensureShp();
+    const gj = await window.shp(await file.arrayBuffer());   // .prj 자동 인식 → WGS84 재투영
+    const fc = Array.isArray(gj)
+      ? { type: 'FeatureCollection', features: gj.reduce((a, x) => a.concat(x.features || []), []) }
+      : gj;
+    if (!fc.features || !fc.features.length) { alert('SHP에서 도형을 찾지 못했습니다.'); return; }
+    await saveOverlay({ kind: 'shp', name: file.name.replace(/\.zip$/i, ''), geojson: fc, count: fc.features.length });
+  } catch (err) { alert('SHP 처리 실패: ' + (err && err.message || err) + '\n(.shp/.dbf/.prj 가 담긴 zip을 올려주세요)'); }
+}
+// 업로드된 참조 레이어 목록/삭제 (내보내기 시트 안)
+async function renderOverlayList() {
+  const box = document.getElementById('overlayList');
+  if (!box) return;
+  const ovs = (await getAllOverlays()).filter(o => o.projectId === currentProjectId);
+  box.innerHTML = ovs.length
+    ? ovs.map(o => `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f0f0f0;">
+        <span style="flex:1;font-size:13px;">${o.kind === 'dxf' ? '📐' : '🗺️'} ${esc(o.name)} <span style="color:#999;">(${o.kind.toUpperCase()}${o.count ? ' · ' + o.count + '개' : ''})</span></span>
+        <span style="color:#d32f2f;cursor:pointer;font-weight:700;font-size:13px;" onclick="removeOverlay('${o.id}')">🗑 삭제</span>
+      </div>`).join('')
+    : '<div style="color:#999;font-size:13px;padding:6px 0;">올린 참조 레이어가 없습니다.</div>';
+}
+async function removeOverlay(id) {
+  if (!confirm('이 참조 레이어를 삭제할까요?')) return;
+  await deleteOverlayRec(id);
+  await loadOverlays();
+  await renderOverlayList();
 }
 async function renameFeature(id) {
   const f = (await getAllFeatures()).find(x => x.id === id);
@@ -1786,7 +1996,7 @@ async function deleteSelected() {
 }
 
 // ========== 내보내기 ==========
-function openExport() { document.getElementById('exportOverlay').classList.add('show'); }
+function openExport() { document.getElementById('exportOverlay').classList.add('show'); renderOverlayList(); }
 function closeExport() { document.getElementById('exportOverlay').classList.remove('show'); }
 
 async function exportCSV() {
@@ -1876,7 +2086,10 @@ async function clearCurrentProject() {
   for (const r of all) await deleteRecord(r.id);
   const feats = (await getAllFeatures()).filter(f => f.projectId === currentProjectId);
   for (const f of feats) await deleteFeature(f.id);
+  const ovs = (await getAllOverlays()).filter(o => o.projectId === currentProjectId);
+  for (const o of ovs) await deleteOverlayRec(o.id);
   await loadMarkers();
+  await loadOverlays();
   alert(`${all.length}건 삭제 완료.`);
   closeExport();
 }
@@ -1887,7 +2100,9 @@ async function clearAllData() {
   if (!confirm('정말 전체 삭제할까요? (마지막 확인)')) return;
   await clearStore(STORE);
   await clearStore(FEATURES);
+  await clearStore(OVERLAYS);
   await loadMarkers();
+  await loadOverlays();
   alert('전체 데이터 삭제 완료.');
   closeExport();
 }
