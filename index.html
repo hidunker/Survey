@@ -234,6 +234,26 @@
   .list-item .del { color: #d32f2f; font-size: 13px; padding: 6px 8px; cursor: pointer; border: 1px solid #f3d2d2; border-radius: 6px; text-align: center; }
   .list-item input.chk { width: 22px; height: 22px; flex-shrink: 0; }
   .empty { text-align: center; color: #999; padding: 40px 0; font-size: 14px; }
+  /* 귀속 하천선별 그룹 헤더 */
+  .group-head {
+    position: sticky; top: 0; z-index: 2; background: #eef4fb; color: #0d47a1;
+    font-weight: 700; font-size: 13px; padding: 8px 10px; margin: 10px 0 0;
+    border-radius: 8px; display: flex; justify-content: space-between; align-items: center;
+    border: 1px solid #d6e6f7;
+  }
+  .group-head .gcnt { font-weight: 600; color: #1565c0; font-size: 12px; }
+  .group-head.unassigned { background: #f3f4f6; color: #555; border-color: #e3e5e8; }
+  /* 목록 내 메모 인라인 수정 */
+  .memo-edit { margin-top: 6px; }
+  .memo-edit textarea {
+    width: 100%; padding: 8px; border: 1px solid #1565c0; border-radius: 8px;
+    font-size: 13px; font-family: inherit; min-height: 54px; resize: vertical;
+  }
+  .memo-edit .me-btns { display: flex; gap: 6px; margin-top: 5px; }
+  .memo-edit .me-save { background: #1565c0; color: #fff; }
+  .memo-edit .me-cancel { background: #eef0f3; color: #444; }
+  .memo-edit button { border: none; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 700; cursor: pointer; }
+  .list-item .memo { color: #1565c0; font-size: 12px; padding: 5px 8px; cursor: pointer; border: 1px solid #cfe0f5; border-radius: 6px; text-align: center; }
   /* 목록이 길어도 상단 닫기(✕)·하단 닫기 버튼이 항상 보이도록 내부 스크롤 */
   #listBody { max-height: 56vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 
@@ -299,6 +319,7 @@
 </div>
 
 <div id="map"></div>
+<div id="cadastralNote" style="display:none;position:fixed;left:8px;bottom:60px;z-index:1100;background:rgba(183,28,28,0.92);color:#fff;font-size:11px;font-weight:700;padding:5px 9px;border-radius:6px;max-width:62vw;box-shadow:0 1px 4px rgba(0,0,0,0.3);line-height:1.35;">⚠ 지적도=참고용 · 성과품은 지자체 취득 지적 사용</div>
 <div id="pickHint">🗺️ 지도를 탭/클릭해 위치를 지정하세요 (취소: 위 닫기)</div>
 <div id="drawHint">🏞️ 하천선: 지도를 클릭해 경로를 이어 그리고 [완료]를 누르세요</div>
 <div id="locConfirm">📍 위치 지정됨 — 지도의 핀 확인 후 여기를 탭하여 등록 계속 ▶</div>
@@ -529,7 +550,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ========== 공통 상수 ==========
-const BUILD = '2026-06-27b (하천선 자동 귀속: 최근접 매칭·수동변경·교차부 모호성경고·묶음보기 + features JSON 포함)';
+const BUILD = '2026-06-27c (목록 하천선별 그룹핑·메모 인라인수정 + 재분류 하천선 복사/중복방지 + 지적도 참고용 오버레이)';
 console.log('현장조사 build:', BUILD);
 const KINDS = ['하천', '소하천', '댐지점', '구조물', '불법시설물', '기타'];
 function kindOptions(sel) {
@@ -564,7 +585,30 @@ const baseLayers = {
   '위성 (Esri·키불필요)':  esriSat,
   '일반 (OSM·대체)':       osm,
 };
-const overlays = { '위성 지명·경계': vHybrid };
+// 지적도(연속지적도) 참고용 오버레이 — VWorld WMS. 확대(z14+)에서만 표출.
+// ⚠ API 지적은 최신이 아닐 수 있음 → 참고용. 성과품은 반드시 지자체 취득 지적으로 작업.
+// (WMS 사용에는 VWorld 키에 WMS 권한 + 도메인 등록 필요. 미허용 시 타일만 비표시되고 앱은 정상.)
+const cadastralUrl = `https://api.vworld.kr/req/wms?key=${VWORLD_KEY}&domain=${location.hostname}`;
+const cadastral = L.tileLayer.wms(cadastralUrl, {
+  layers: 'lp_pa_cbnd_bubun', styles: 'lp_pa_cbnd_bubun',
+  format: 'image/png', transparent: true, version: '1.3.0',
+  opacity: 0.55, maxZoom: 19, attribution: 'VWorld 지적(참고용)'
+});
+function onCadastralOn() {
+  document.getElementById('cadastralNote').style.display = 'block';
+  if (!sessionStorage.getItem('cadastral_notified')) {
+    sessionStorage.setItem('cadastral_notified', '1');
+    alert('지적도(연속지적도)는 참고용입니다.\n\n' +
+      '• 실제 성과품은 반드시 지자체에서 취득한 지적으로 작업하세요.\n' +
+      '• VWorld API 지적은 최신이 아닐 수 있습니다.\n' +
+      '• 많이 확대(줌인)하면 경계가 표시됩니다.');
+  }
+}
+function onCadastralOff() { document.getElementById('cadastralNote').style.display = 'none'; }
+cadastral.on('add', onCadastralOn);
+cadastral.on('remove', onCadastralOff);
+
+const overlays = { '위성 지명·경계': vHybrid, '지적도 (참고용·VWorld)': cadastral };
 L.control.layers(baseLayers, overlays, { position: 'topright', collapsed: false }).addTo(map);
 L.control.zoom({ position: 'topright' }).addTo(map);
 L.control.scale({ position: 'bottomleft', metric: true, imperial: false, maxWidth: 140 }).addTo(map);
@@ -1391,6 +1435,7 @@ let listFilterFeatureId = null;   // 하천선 귀속 필터(특정 하천선의
 let featNameById = {};            // 목록 행에 귀속 하천명 표시용
 
 async function openList() {
+  memoEditId = null;
   let recs = (await getAll()).filter(r => r.projectId === currentProjectId);
   featNameById = {};
   (await getAllFeatures()).filter(f => f.projectId === currentProjectId)
@@ -1413,40 +1458,106 @@ function clearListFilter() {
   listFilterFeatureId = null;
   openList();
 }
+// HTML escape (메모에 < > & " 들어가도 안전)
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+let memoEditId = null;   // 목록에서 메모 인라인 수정 중인 기록 id
+
+function listItemHTML(r) {
+  const when = new Date(r.time).toLocaleString('ko-KR');
+  const thumb = r.photo
+    ? `<img class="thumb" src="${r.photo}" onclick="event.stopPropagation(); openPhotoView('${r.id}')" title="크게 보기">`
+    : `<div class="nophoto" title="사진 없음(정보 기록)">📝</div>`;
+  const chk = selectMode
+    ? `<input type="checkbox" class="chk" ${selectedIds.has(r.id) ? 'checked' : ''} onclick="event.stopPropagation(); toggleSel('${r.id}', this.checked)">`
+    : '';
+  // 메모 영역: 인라인 수정 중이면 textarea, 아니면 텍스트
+  const memoBlock = (memoEditId === r.id)
+    ? `<div class="memo-edit" onclick="event.stopPropagation();">
+         <textarea id="memoEdit_${r.id}">${esc(r.memo)}</textarea>
+         <div class="me-btns">
+           <button class="me-save" onclick="event.stopPropagation(); saveMemoInline('${r.id}')">저장</button>
+           <button class="me-cancel" onclick="event.stopPropagation(); cancelMemoInline()">취소</button>
+         </div>
+       </div>`
+    : `<div class="s">${esc(r.memo) || '(메모 없음)'}</div>`;
+  const actions = selectMode ? '' : `
+    <div class="actions">
+      <div class="memo" onclick="event.stopPropagation(); editMemoInline('${r.id}')" title="메모만 빠르게 수정">✎ 메모</div>
+      <div class="edit" onclick="event.stopPropagation(); editItem('${r.id}')">수정</div>
+      <div class="del" onclick="event.stopPropagation(); removeItem('${r.id}')">삭제</div>
+    </div>`;
+  const rowClick = selectMode
+    ? `onclick="toggleSel('${r.id}')"`
+    : `onclick="goTo(${r.lat},${r.lng})"`;
+  const riverTag = r.featureId && featNameById[r.featureId]
+    ? ` <span style="color:#1565c0;font-weight:600;">· 🏞️ ${esc(featNameById[r.featureId])}</span>` : '';
+  return `<div class="list-item" ${rowClick}>
+    ${chk}
+    ${thumb}
+    <div class="info">
+      <div class="t">${esc(r.kind)}${riverTag}${r.featureAmbiguous ? ' <span style="color:#e65100;">⚠</span>' : ''}</div>
+      ${memoBlock}
+      <div class="s">${when}</div>
+    </div>
+    ${actions}
+  </div>`;
+}
+
 function renderList() {
   const body = document.getElementById('listBody');
   if (listCache.length === 0) {
     body.innerHTML = '<div class="empty">등록된 조사가 없습니다.</div>';
-  } else {
-    body.innerHTML = listCache.map(r => {
-      const when = new Date(r.time).toLocaleString('ko-KR');
-      const thumb = r.photo
-        ? `<img class="thumb" src="${r.photo}" onclick="event.stopPropagation(); openPhotoView('${r.id}')" title="크게 보기">`
-        : `<div class="nophoto" title="사진 없음(정보 기록)">📝</div>`;
-      const chk = selectMode
-        ? `<input type="checkbox" class="chk" ${selectedIds.has(r.id) ? 'checked' : ''} onclick="event.stopPropagation(); toggleSel('${r.id}', this.checked)">`
-        : '';
-      const actions = selectMode ? '' : `
-        <div class="actions">
-          <div class="edit" onclick="event.stopPropagation(); editItem('${r.id}')">수정</div>
-          <div class="del" onclick="event.stopPropagation(); removeItem('${r.id}')">삭제</div>
-        </div>`;
-      const rowClick = selectMode
-        ? `onclick="toggleSel('${r.id}')"`
-        : `onclick="goTo(${r.lat},${r.lng})"`;
-      return `<div class="list-item" ${rowClick}>
-        ${chk}
-        ${thumb}
-        <div class="info">
-          <div class="t">${r.kind}${r.featureId && featNameById[r.featureId] ? ` <span style="color:#1565c0;font-weight:600;">· 🏞️ ${featNameById[r.featureId]}</span>` : ''}${r.featureAmbiguous ? ' <span style="color:#e65100;">⚠</span>' : ''}</div>
-          <div class="s">${r.memo || '(메모 없음)'}</div>
-          <div class="s">${when}</div>
-        </div>
-        ${actions}
-      </div>`;
-    }).join('');
+    updateSelCount();
+    return;
   }
+  // 귀속 하천선별 그룹핑 — 같은 하천선끼리 묶고, 그룹은 하천명 오름차순(미귀속은 맨 끝)
+  const groups = new Map();
+  listCache.forEach(r => {
+    const k = r.featureId || '';
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(r);
+  });
+  const keys = [...groups.keys()].sort((a, b) => {
+    if (a === '' && b === '') return 0;
+    if (a === '') return 1; if (b === '') return -1;
+    return (featNameById[a] || '').localeCompare(featNameById[b] || '', 'ko');
+  });
+  let html = '';
+  for (const k of keys) {
+    const arr = groups.get(k).sort((a, b) => b.time - a.time);   // 그룹 내 최신순
+    if (k) {
+      html += `<div class="group-head"><span>🏞️ ${esc(featNameById[k] || '하천선')}</span><span class="gcnt">${arr.length}건</span></div>`;
+    } else if (keys.length > 1) {
+      html += `<div class="group-head unassigned"><span>📍 미귀속(가까운 하천선 없음/없음 지정)</span><span class="gcnt">${arr.length}건</span></div>`;
+    }
+    html += arr.map(listItemHTML).join('');
+  }
+  body.innerHTML = html;
   updateSelCount();
+}
+
+// ----- 목록 내 메모 인라인 수정 (목록에 머물며 여러 건 빠르게 정리) -----
+function editMemoInline(id) {
+  memoEditId = id;
+  renderList();
+  const ta = document.getElementById('memoEdit_' + id);
+  if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+}
+function cancelMemoInline() { memoEditId = null; renderList(); }
+async function saveMemoInline(id) {
+  const ta = document.getElementById('memoEdit_' + id);
+  if (!ta) return;
+  const v = ta.value.trim();
+  const rec = (await getAll()).find(r => r.id === id);
+  if (rec) { rec.memo = v; await putRecord(rec); }
+  const c = listCache.find(r => r.id === id);
+  if (c) c.memo = v;            // 캐시도 갱신해 목록 재조회 없이 반영
+  memoEditId = null;
+  renderList();
+  loadMarkers();                // 지도 팝업 메모도 갱신(목록은 그대로 유지)
 }
 function closeList() {
   document.getElementById('listOverlay').classList.remove('show');
@@ -1492,6 +1603,7 @@ async function removeItem(id) {
 // ----- 다중 선택 -----
 function toggleSelectMode() {
   selectMode = !selectMode;
+  memoEditId = null;
   selectedIds.clear();
   document.getElementById('selToggle').classList.toggle('on', selectMode);
   document.getElementById('selToggle').textContent = selectMode ? '☑️ 선택 해제' : '☑️ 선택';
@@ -1536,20 +1648,59 @@ async function reassignNewProject() {
   sel.innerHTML += `<option value="${id}" selected>${name.trim()}</option>`;
   sel.value = id;
 }
+// 하천선 계보 키: 복사본은 originId(원본 id)를 물려받아 같은 하천선임을 식별 → 중복 복사 방지
+function featureLineageKey(f) { return f.originId || f.id; }
+// 선택한 하천선들을 대상 사업으로 복사(이미 같은 하천선이 있으면 재사용). oldId→targetId 맵 반환.
+async function copyFeaturesToProject(srcIds, target) {
+  const allF = await getAllFeatures();
+  const targetFeats = allF.filter(f => f.projectId === target);
+  const map = new Map();
+  for (const sid of srcIds) {
+    const src = allF.find(f => f.id === sid);
+    if (!src) continue;
+    const key = featureLineageKey(src);
+    const dup = targetFeats.find(f => featureLineageKey(f) === key);   // 동일 하천선 이미 존재?
+    if (dup) { map.set(sid, dup.id); continue; }                       // → 중복 안 만들고 재사용
+    const nid = 'f' + Date.now() + Math.floor(Math.random() * 1000);
+    const copy = { ...src, id: nid, projectId: target, originId: key, created: Date.now() };
+    await putFeature(copy);
+    targetFeats.push(copy);
+    map.set(sid, nid);
+  }
+  return map;
+}
+
 async function applyReassign() {
   const target = document.getElementById('reassignProject').value;
   const ids = [...selectedIds];
+  if (target === currentProjectId) { alert('현재 사업과 다른 사업을 선택하세요.'); return; }
   if (!confirm(`${ids.length}건을 선택한 사업으로 이동합니다. 계속할까요?`)) return;
+
   const all = await getAll();
-  for (const r of all) {
-    if (selectedIds.has(r.id)) {
-      r.projectId = target;
-      // 귀속 하천선은 사업별이므로 사업이 바뀌면 귀속 해제 후 대상 사업에서 재계산
-      r.featureId = null; r.featureManual = false; r.featureAmbiguous = false;
-      await putRecord(r);
-    }
+  const moving = all.filter(r => selectedIds.has(r.id));
+  // 이동 대상이 귀속한 (현재 사업의) 하천선 목록
+  const srcFeatIds = [...new Set(moving.map(r => r.featureId).filter(Boolean))];
+  let copyMap = null;
+  if (srcFeatIds.length) {
+    copyMap = confirm(
+      `선택한 조사에 귀속된 하천선 ${srcFeatIds.length}개도 대상 사업으로 함께 가져갈까요?\n\n` +
+      `[확인] 하천선 복사 — 귀속이 그대로 유지됩니다 (대상 사업에 같은 하천선이 이미 있으면 중복 없이 재사용).\n` +
+      `[취소] 복사 안 함 — 귀속을 해제하고, 대상 사업의 기존 하천선 기준으로 다시 자동 귀속합니다.`
+    ) ? await copyFeaturesToProject(srcFeatIds, target) : null;
   }
-  await recomputeAuto(target);   // 대상 사업의 하천선 기준 자동 귀속
+
+  for (const r of moving) {
+    r.projectId = target;
+    if (copyMap && r.featureId && copyMap.has(r.featureId)) {
+      r.featureId = copyMap.get(r.featureId);     // 복사된(또는 재사용) 하천선으로 귀속 유지
+      // featureManual은 그대로 유지(수동 지정 보존)
+    } else {
+      r.featureId = null; r.featureManual = false; r.featureAmbiguous = false;
+    }
+    await putRecord(r);
+  }
+  if (!copyMap) await recomputeAuto(target);   // 복사 안 한 경우만 대상 사업 하천선으로 자동 귀속
+
   closeReassign();
   selectedIds.clear();
   renderProjectSelect(await getAllProjects());
