@@ -76,6 +76,23 @@
   .leaflet-control-layers { font-size: 13px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
   .leaflet-control-layers-expanded { padding: 8px 12px 8px 8px; }
   .north-arrow { filter: drop-shadow(0 1px 3px rgba(0,0,0,0.35)); cursor: default; }
+  /* 좌측 참조 레이어 패널 */
+  #overlayPanel {
+    display: none; position: fixed; left: 8px; top: 110px; z-index: 1100;
+    background: rgba(255,255,255,0.96); border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+    max-width: 60vw; width: 220px; overflow: hidden;
+  }
+  #overlayPanel .ovp-head {
+    background: #1565c0; color: #fff; font-size: 12px; font-weight: 700; padding: 7px 10px;
+  }
+  #overlayPanelBody { max-height: 38vh; overflow-y: auto; padding: 4px 8px 8px; }
+  #overlayPanel .ov-row { display: flex; align-items: center; gap: 6px; padding: 5px 0; border-bottom: 1px solid #f0f2f5; }
+  #overlayPanel .ov-row:last-child { border-bottom: none; }
+  #overlayPanel .ov-toggle { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; cursor: pointer; }
+  #overlayPanel .ov-toggle input { width: 18px; height: 18px; flex-shrink: 0; }
+  #overlayPanel .ov-name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #overlayPanel .ov-del { color: #d32f2f; cursor: pointer; font-size: 14px; flex-shrink: 0; padding: 2px 4px; }
+  #overlayPanel .ov-del:active { background: #fdeaea; border-radius: 6px; }
   .leaflet-control-scale { margin-bottom: 8px !important; }
   .leaflet-control-scale-line { font-size: 11px; padding: 2px 6px; }
 
@@ -326,6 +343,12 @@
 
 <div id="map"></div>
 <div id="cadastralNote" style="display:none;position:fixed;left:8px;bottom:60px;z-index:1100;background:rgba(183,28,28,0.92);color:#fff;font-size:11px;font-weight:700;padding:5px 9px;border-radius:6px;max-width:62vw;box-shadow:0 1px 4px rgba(0,0,0,0.3);line-height:1.35;">⚠ 지적도=참고용 · 성과품은 지자체 취득 지적 사용</div>
+
+<!-- 좌측 참조 레이어(DXF/SHP) 패널 -->
+<div id="overlayPanel">
+  <div class="ovp-head">📂 참조 레이어 (DXF/SHP)</div>
+  <div id="overlayPanelBody"></div>
+</div>
 <div id="pickHint">🗺️ 지도를 탭/클릭해 위치를 지정하세요 (취소: 위 닫기)</div>
 <div id="drawHint">🏞️ 선형(하천·도로 등): 지도를 클릭해 경로를 이어 그리고 [완료]를 누르세요</div>
 <div id="locConfirm">📍 위치 지정됨 — 지도의 핀 확인 후 여기를 탭하여 등록 계속 ▶</div>
@@ -548,8 +571,7 @@
       </div>
     </div>
     <input type="file" id="shpInput" accept=".zip" style="display:none" onchange="uploadShp(this.files[0]); this.value=''">
-    <div style="font-size:11px;color:#b71c1c;margin:2px 0 6px;">⚠ 개발단계 — 너무 무거운(수만 요소) DXF/SHP는 앱이 느려질 수 있어 지양 권장.</div>
-    <div id="overlayList" style="margin-bottom:8px;"></div>
+    <div style="font-size:11px;color:#b71c1c;margin:2px 0 6px;">⚠ 개발단계 — 너무 무거운(수만 요소) DXF/SHP는 앱이 느려질 수 있어 지양 권장. 올린 레이어는 <b>좌측 "참조 레이어" 패널</b>에서 끄고켜기·삭제.</div>
 
     <div class="section-cap">데이터 삭제 (되돌릴 수 없음)</div>
     <div class="export-option danger" onclick="clearCurrentProject()">
@@ -576,7 +598,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ========== 공통 상수 ==========
-const BUILD = '2026-06-27e (DXF/SHP 참조레이어 업로드·토글 + 로그인 개발자마킹 + 지적 위성 가시성 강화)';
+const BUILD = '2026-06-27f (DXF/SHP를 JSON 백업에 포함 + 좌측 참조레이어 패널 on/off·삭제 + 지적 위성 투명도↑)';
 console.log('현장조사 build:', BUILD);
 const KINDS = ['하천', '소하천', '댐지점', '구조물', '불법시설물', '기타'];
 function kindOptions(sel) {
@@ -688,8 +710,8 @@ function applyCadastralStyle() {
   if (!map.hasLayer(cadastral)) return;
   const c = cadastral.getContainer && cadastral.getContainer();
   if (isSatellite) {
-    // 위성: 경계·글자를 진하고 선명하게 — 더 불투명 + 밝게(노랑→흰계열) + 검은 외곽선(글자 가독성)
-    cadastral.setOpacity(0.95);
+    // 위성: 경계·글자는 선명하게(밝기·대비·외곽선) 하되, 뒤 위성이 더 비치도록 불투명도는 0.85로(↓10%p)
+    cadastral.setOpacity(0.85);
     if (c) c.style.filter = 'brightness(1.7) contrast(1.5) drop-shadow(0 0 1px #000) drop-shadow(0 0 1px #000)';
   } else {
     cadastral.setOpacity(0.55);
@@ -1077,8 +1099,7 @@ function dxfToShapes(dxf, srcDef) {
   return out;
 }
 
-let overlayCtrlLayers = {};      // overlayId → Leaflet layer
-let suppressOverlayPersist = false;
+let overlayCtrlLayers = {};      // overlayId → Leaflet layer (좌측 패널에서 토글)
 function buildDxfLayer(shapes) {
   const g = L.layerGroup();
   (shapes || []).forEach(s => {
@@ -1098,10 +1119,8 @@ function buildShpLayer(geojson) {
   });
 }
 async function loadOverlays() {
-  suppressOverlayPersist = true;
   for (const id in overlayCtrlLayers) {
     const lyr = overlayCtrlLayers[id];
-    layerControl.removeLayer(lyr);
     if (map.hasLayer(lyr)) map.removeLayer(lyr);
   }
   overlayCtrlLayers = {};
@@ -1110,19 +1129,34 @@ async function loadOverlays() {
     const lyr = (o.kind === 'dxf') ? buildDxfLayer(o.shapes) : buildShpLayer(o.geojson);
     lyr._overlayId = o.id;
     overlayCtrlLayers[o.id] = lyr;
-    layerControl.addOverlay(lyr, `${o.kind === 'dxf' ? '📐' : '🗺️'} ${esc(o.name)}`);
     if (o.visible !== false) lyr.addTo(map);
   }
   applyRefShapeStyle();
-  suppressOverlayPersist = false;
+  await renderOverlayPanel();
 }
-async function setOverlayVisible(id, v) {
-  if (suppressOverlayPersist) return;
+// 좌측 참조 레이어 패널 (DXF/SHP on/off + 삭제)
+async function renderOverlayPanel() {
+  const panel = document.getElementById('overlayPanel');
+  const body = document.getElementById('overlayPanelBody');
+  if (!panel || !body) return;
+  const ovs = (await getAllOverlays()).filter(o => o.projectId === currentProjectId);
+  if (!ovs.length) { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  body.innerHTML = ovs.map(o => `
+    <div class="ov-row">
+      <label class="ov-toggle">
+        <input type="checkbox" ${o.visible !== false ? 'checked' : ''} onchange="toggleOverlay('${o.id}', this.checked)">
+        <span class="ov-name">${o.kind === 'dxf' ? '📐' : '🗺️'} ${esc(o.name)}</span>
+      </label>
+      <span class="ov-del" onclick="removeOverlay('${o.id}')" title="삭제">🗑</span>
+    </div>`).join('');
+}
+async function toggleOverlay(id, on) {
+  const lyr = overlayCtrlLayers[id];
+  if (lyr) { if (on) lyr.addTo(map); else if (map.hasLayer(lyr)) map.removeLayer(lyr); }
   const o = (await getAllOverlays()).find(x => x.id === id);
-  if (o && o.visible !== v) { o.visible = v; await putOverlay(o); }
+  if (o && o.visible !== on) { o.visible = on; await putOverlay(o); }
 }
-map.on('overlayadd',    e => { if (e.layer && e.layer._overlayId) setOverlayVisible(e.layer._overlayId, true); });
-map.on('overlayremove', e => { if (e.layer && e.layer._overlayId) setOverlayVisible(e.layer._overlayId, false); });
 
 async function saveOverlay(o) {
   const rec = { id: 'ov' + Date.now(), projectId: currentProjectId, visible: true, created: Date.now(), ...o };
@@ -1131,7 +1165,7 @@ async function saveOverlay(o) {
       !confirm(`이 레이어가 큽니다(약 ${(size / 1048576).toFixed(1)}MB).\n개발단계에서는 무거운 DXF/SHP는 앱이 느려질 수 있어 지양 권장입니다.\n그래도 추가할까요?`)) return;
   await putOverlay(rec);
   await loadOverlays();
-  alert(`참조 레이어 추가됨: ${rec.name}\n(우측 레이어 목록에서 끄고켤 수 있습니다)`);
+  alert(`참조 레이어 추가됨: ${rec.name}\n(좌측 "참조 레이어" 패널에서 끄고켜기·삭제할 수 있습니다)`);
 }
 async function uploadDxf(file) {
   if (!file) return;
@@ -1160,23 +1194,11 @@ async function uploadShp(file) {
     await saveOverlay({ kind: 'shp', name: file.name.replace(/\.zip$/i, ''), geojson: fc, count: fc.features.length });
   } catch (err) { alert('SHP 처리 실패: ' + (err && err.message || err) + '\n(.shp/.dbf/.prj 가 담긴 zip을 올려주세요)'); }
 }
-// 업로드된 참조 레이어 목록/삭제 (내보내기 시트 안)
-async function renderOverlayList() {
-  const box = document.getElementById('overlayList');
-  if (!box) return;
-  const ovs = (await getAllOverlays()).filter(o => o.projectId === currentProjectId);
-  box.innerHTML = ovs.length
-    ? ovs.map(o => `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f0f0f0;">
-        <span style="flex:1;font-size:13px;">${o.kind === 'dxf' ? '📐' : '🗺️'} ${esc(o.name)} <span style="color:#999;">(${o.kind.toUpperCase()}${o.count ? ' · ' + o.count + '개' : ''})</span></span>
-        <span style="color:#d32f2f;cursor:pointer;font-weight:700;font-size:13px;" onclick="removeOverlay('${o.id}')">🗑 삭제</span>
-      </div>`).join('')
-    : '<div style="color:#999;font-size:13px;padding:6px 0;">올린 참조 레이어가 없습니다.</div>';
-}
 async function removeOverlay(id) {
-  if (!confirm('이 참조 레이어를 삭제할까요?')) return;
+  const o = (await getAllOverlays()).find(x => x.id === id);
+  if (!confirm(`참조 레이어 "${o ? o.name : ''}"을(를) 정말 삭제할까요?`)) return;
   await deleteOverlayRec(id);
   await loadOverlays();
-  await renderOverlayList();
 }
 async function renameFeature(id) {
   const f = (await getAllFeatures()).find(x => x.id === id);
@@ -1996,7 +2018,7 @@ async function deleteSelected() {
 }
 
 // ========== 내보내기 ==========
-function openExport() { document.getElementById('exportOverlay').classList.add('show'); renderOverlayList(); }
+function openExport() { document.getElementById('exportOverlay').classList.add('show'); }
 function closeExport() { document.getElementById('exportOverlay').classList.remove('show'); }
 
 async function exportCSV() {
@@ -2017,10 +2039,11 @@ async function exportCSV() {
 async function exportJSON() {
   const all = await getAll();
   const feats = await getAllFeatures();
-  if (!all.length && !feats.length) { alert('등록된 데이터가 없습니다.'); return; }
-  // 신형식: records + features(하천선) 함께 내보내 귀속(featureId)이 백업·이관에서 유지됨
-  const payload = { app: 'fieldSurvey', version: 3, exportedAt: Date.now(), records: all, features: feats };
-  const json = JSON.stringify(payload, null, 2);
+  const ovs = await getAllOverlays();
+  if (!all.length && !feats.length && !ovs.length) { alert('등록된 데이터가 없습니다.'); return; }
+  // 신형식: records + features(선형) + overlays(DXF/SHP) 함께 내보내 → 폰에서 JSON 하나로 메모·선형·참조도형 모두 복원
+  const payload = { app: 'fieldSurvey', version: 4, exportedAt: Date.now(), records: all, features: feats, overlays: ovs };
+  const json = JSON.stringify(payload);
   await shareOrDownload(new Blob([json], { type: 'application/json' }), '현장조사_백업_' + dateTag() + '.json');
 }
 
@@ -2031,16 +2054,17 @@ async function importJSON(e) {
   const text = await file.text();
   let data;
   try { data = JSON.parse(text); } catch { alert('JSON 파일을 읽을 수 없습니다.'); return; }
-  // 하위호환: 배열=구형식(records만) / 객체=신형식({records, features})
-  let records, features;
-  if (Array.isArray(data)) { records = data; features = []; }
-  else if (data && Array.isArray(data.records)) { records = data.records; features = data.features || []; }
+  // 하위호환: 배열=구형식(records만) / 객체=신형식({records, features, overlays})
+  let records, features, ovs;
+  if (Array.isArray(data)) { records = data; features = []; ovs = []; }
+  else if (data && Array.isArray(data.records)) { records = data.records; features = data.features || []; ovs = data.overlays || []; }
   else { alert('올바른 백업 파일이 아닙니다.'); return; }
-  const msg = `조사 ${records.length}건` + (features.length ? ` · 하천선 ${features.length}개` : '') +
+  const msg = `조사 ${records.length}건` + (features.length ? ` · 선형 ${features.length}개` : '') +
+    (ovs.length ? ` · 참조레이어(DXF/SHP) ${ovs.length}개` : '') +
     `를 현재 사업으로 복원합니다. 기존 데이터에 추가(덮어쓰기)됩니다. 계속할까요?`;
   if (!confirm(msg)) return;
   const ids = new Set((await getAllProjects()).map(p => p.id));
-  // 하천선(features) 먼저 복원 — id는 유지, projectId만 현재 사업으로(귀속 featureId 링크 보존)
+  // 선형(features) 먼저 복원 — id는 유지, projectId만 현재 사업으로(귀속 featureId 링크 보존)
   for (const f of features) {
     if (!f.projectId || !ids.has(f.projectId)) f.projectId = currentProjectId;
     await putFeature(f);
@@ -2049,8 +2073,15 @@ async function importJSON(e) {
     if (!r.projectId || !ids.has(r.projectId)) r.projectId = currentProjectId;
     await putRecord(r);
   }
+  // 참조 레이어(DXF/SHP) 복원 → 폰에서도 메모·선형과 함께 도형이 바로 보임
+  for (const o of ovs) {
+    if (!o.projectId || !ids.has(o.projectId)) o.projectId = currentProjectId;
+    await putOverlay(o);
+  }
   await loadMarkers();
-  alert(`복원 완료 — 조사 ${records.length}건` + (features.length ? `, 하천선 ${features.length}개` : '') + '.');
+  await loadOverlays();
+  alert(`복원 완료 — 조사 ${records.length}건` + (features.length ? `, 선형 ${features.length}개` : '') +
+    (ovs.length ? `, 참조레이어 ${ovs.length}개` : '') + '.');
   closeExport();
 }
 
