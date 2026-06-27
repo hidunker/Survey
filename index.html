@@ -374,6 +374,12 @@
       <select id="kindInput"></select>
     </div>
 
+    <div class="field" id="featureField" style="display:none;">
+      <label>귀속 하천선 <span style="font-weight:400;font-size:12px;color:#888;">(가까운 하천선에 자동으로 묶임 · 수정 가능)</span></label>
+      <select id="featureInput" onchange="refreshAutoAttribution()"></select>
+      <div class="meta" id="featureMeta"></div>
+    </div>
+
     <div class="field">
       <label>메모 (특이사항)</label>
       <textarea id="memoInput" placeholder="예: 호안 일부 유실, 토사 퇴적 / 사무실 사전메모: 여기서 ~확인 필요 등"></textarea>
@@ -398,6 +404,11 @@
     <div class="sheet-handle"></div>
     <button class="sheet-close" onclick="closeList()" title="닫기">✕</button>
     <h2>조사 목록</h2>
+
+    <div id="listFilterBar" style="display:none; align-items:center; gap:8px; background:#e8f1fb; border:1px solid #cfe0f5; border-radius:8px; padding:8px 10px; margin-bottom:10px; font-size:13px;">
+      <span id="listFilterLabel" style="flex:1; color:#1565c0; font-weight:700;"></span>
+      <button class="mini-btn" onclick="clearListFilter()">전체 보기</button>
+    </div>
 
     <div class="list-toolbar">
       <button class="mini-btn" id="selToggle" onclick="toggleSelectMode()">☑️ 선택</button>
@@ -518,7 +529,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ========== 공통 상수 ==========
-const BUILD = '2026-06-27a (텍스트공유 제거 + 복원 파일선택 accept 해제로 클라우드 경유 허용)';
+const BUILD = '2026-06-27b (하천선 자동 귀속: 최근접 매칭·수동변경·교차부 모호성경고·묶음보기 + features JSON 포함)';
 console.log('현장조사 build:', BUILD);
 const KINDS = ['하천', '소하천', '댐지점', '구조물', '불법시설물', '기타'];
 function kindOptions(sel) {
@@ -685,6 +696,70 @@ function getAllFeatures() {
 function putFeature(f)       { return idbWrite(FEATURES, os => os.put(f)); }
 function deleteFeature(id)   { return idbWrite(FEATURES, os => os.delete(id)); }
 
+// ========== 하천선 자동 귀속 (조사 → 가장 가까운 하천선) ==========
+// 핵심 효용: 장거리 하천(수십~100km) 조사에서 자료가 어느 하천 구간에 속하는지
+//           라인 기준으로 묶어 정렬·탐색. records.featureId 로 귀속을 저장.
+//   - 자동: 저장 시 가장 가까운 line feature에 귀속(featureManual=false)
+//   - 수동: 폼에서 특정 하천선/없음 선택 시 featureManual=true → 재계산에서 제외
+
+// 위경도를 점 p 기준 국소 평면(미터)으로 근사 변환 (등거리 직사각 투영)
+function _toXY(q, origin) {
+  const R = 6378137, rad = Math.PI / 180;
+  const cosLat = Math.cos(origin.lat * rad);
+  return { x: (q.lng - origin.lng) * rad * cosLat * R, y: (q.lat - origin.lat) * rad * R };
+}
+// 점 p 에서 선분 a-b 까지 최소거리(m)
+function pointToSegMeters(p, a, b) {
+  const P = { x: 0, y: 0 }, A = _toXY(a, p), B = _toXY(b, p);
+  const dx = B.x - A.x, dy = B.y - A.y, len2 = dx * dx + dy * dy;
+  let t = len2 ? ((P.x - A.x) * dx + (P.y - A.y) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(P.x - (A.x + t * dx), P.y - (A.y + t * dy));
+}
+// 점 → 폴리라인(coords=[[lat,lng],...]) 최소거리(m)
+function pointToLineMeters(lat, lng, coords) {
+  let min = Infinity; const p = { lat, lng };
+  for (let i = 0; i < coords.length - 1; i++) {
+    const d = pointToSegMeters(
+      p, { lat: coords[i][0], lng: coords[i][1] }, { lat: coords[i + 1][0], lng: coords[i + 1][1] });
+    if (d < min) min = d;
+  }
+  return min;
+}
+// 가장 가까운 하천선 + 2순위(교차부 모호성 판단용)
+async function nearestLineFeature(lat, lng, projectId) {
+  const feats = (await getAllFeatures()).filter(
+    f => f.projectId === projectId && f.type === 'line' && Array.isArray(f.coords) && f.coords.length >= 2);
+  let best = null, bestD = Infinity, second = null, secondD = Infinity;
+  for (const f of feats) {
+    const d = pointToLineMeters(lat, lng, f.coords);
+    if (d < bestD) { second = best; secondD = bestD; best = f; bestD = d; }
+    else if (d < secondD) { second = f; secondD = d; }
+  }
+  return { feature: best, dist: bestD, second, secondDist: secondD, count: feats.length };
+}
+// ⚠ T자/X자 교차부 모호성: 1·2순위 거리차가 작으면 자동귀속이 불확실 → 사용자 확인 권장 플래그.
+//   (근본 해법은 명세 §10 — 측점·방향 기반 매칭. 현재는 단순 최근접 + 모호성 경고 + 수동 변경.)
+function isAmbiguous(bestD, secondD) {
+  if (!isFinite(secondD)) return false;
+  return (secondD - bestD) < 25 || (bestD > 0 && secondD < bestD * 1.25 && (secondD - bestD) < 60);
+}
+// 자동 귀속 기록(featureManual=false) 일괄 재계산 — 하천선 추가/삭제 후 호출
+async function recomputeAuto(projectId = currentProjectId) {
+  const recs = (await getAll()).filter(r => r.projectId === projectId && !r.featureManual);
+  for (const r of recs) {
+    const la = Number(r.lat), ln = Number(r.lng);
+    if (!isFinite(la) || !isFinite(ln)) continue;
+    const near = await nearestLineFeature(la, ln, projectId);
+    const newId = near.feature ? near.feature.id : null;
+    const amb = near.feature ? isAmbiguous(near.dist, near.secondDist) : false;
+    if (r.featureId !== newId || !!r.featureAmbiguous !== amb) {
+      r.featureId = newId; r.featureAmbiguous = amb;
+      await putRecord(r);
+    }
+  }
+}
+
 // ========== 사업 선택/생성 ==========
 function renderProjectSelect(projects) {
   const sel = document.getElementById('projectSelect');
@@ -746,6 +821,9 @@ async function loadMarkers() {
   recordMarkers.forEach(m => map.removeLayer(m));
   recordMarkers = [];
   const all = (await getAll()).filter(r => r.projectId === currentProjectId);
+  // 귀속 하천선 이름 조회용 맵 (마커 팝업에 "🏞️ ○○천" 표기)
+  const featById = new Map(
+    (await getAllFeatures()).filter(f => f.projectId === currentProjectId).map(f => [f.id, f]));
   let drawn = 0, badLoc = 0;
   all.forEach(r => {
     // 좌표를 Number로 변환해 수용(문자열 좌표도 처리). 무효하면 카운트만 하고 skip
@@ -754,6 +832,10 @@ async function loadMarkers() {
     drawn++;
     const m = L.marker([la, ln], { icon: createMarkerIcon() }).addTo(map);
     const when = new Date(r.time).toLocaleString('ko-KR');
+    const feat = r.featureId ? featById.get(r.featureId) : null;
+    const riverLine = feat
+      ? `<br><span style="color:#1565c0;">🏞️ ${feat.name}</span>${r.featureAmbiguous ? ' <span style="color:#e65100;">⚠갈래확인</span>' : ''}`
+      : '';
     const img = r.photo
       ? `<img src="${r.photo}" style="width:160px;border-radius:6px;display:block;margin-top:6px;cursor:pointer;" onclick="openPhotoView('${r.id}')" title="클릭하면 크게 보기">`
       : '';
@@ -762,7 +844,7 @@ async function loadMarkers() {
       `<span style="flex:1;text-align:center;color:#1565c0;cursor:pointer;font-weight:700;border:1px solid #cfe0f5;border-radius:6px;padding:6px 0;" onclick="editFromMap('${r.id}')">✏️ 수정</span>` +
       `<span style="flex:1;text-align:center;color:#d32f2f;cursor:pointer;font-weight:700;border:1px solid #f3d2d2;border-radius:6px;padding:6px 0;" onclick="removeFromMap('${r.id}')">🗑 삭제</span>` +
       `</div>`;
-    m.bindPopup(`<b>${r.kind}</b><br>${r.memo || '(메모 없음)'}<br><small>${when}</small>${img}${actions}`);
+    m.bindPopup(`<b>${r.kind}</b>${riverLine}<br>${r.memo || '(메모 없음)'}<br><small>${when}</small>${img}${actions}`);
     recordMarkers.push(m);
   });
   document.getElementById('count').textContent =
@@ -776,11 +858,20 @@ async function loadFeatures() {
   featureLayers.forEach(l => map.removeLayer(l));
   featureLayers = [];
   const feats = (await getAllFeatures()).filter(f => f.projectId === currentProjectId);
+  // 하천선별 귀속 조사 건수 집계
+  const recs = (await getAll()).filter(r => r.projectId === currentProjectId);
+  const cntById = {};
+  recs.forEach(r => { if (r.featureId) cntById[r.featureId] = (cntById[r.featureId] || 0) + 1; });
   feats.forEach(f => {
     if (f.type === 'line' && Array.isArray(f.coords) && f.coords.length >= 2) {
       const pl = L.polyline(f.coords, { color: f.color || '#1e88e5', weight: 4, opacity: 0.85 }).addTo(map);
+      const n = cntById[f.id] || 0;
+      const bundle = n
+        ? `<span style="color:#1565c0;cursor:pointer;font-weight:700;" onclick="openFeatureRecords('${f.id}')">📋 귀속 조사 ${n}건 보기</span><br>`
+        : `<span style="color:#888;">귀속된 조사 없음</span><br>`;
       pl.bindPopup(
         `<b>🏞️ ${f.name}</b><br><small>하천선 · ${f.coords.length}점</small><br>` +
+        bundle +
         `<span style="color:#1565c0;cursor:pointer;font-weight:700;" onclick="renameFeature('${f.id}')">✏️ 이름 수정</span>` +
         ` &nbsp;·&nbsp; ` +
         `<span style="color:#d32f2f;cursor:pointer;font-weight:700;" onclick="removeFeature('${f.id}')">🗑 삭제</span>`
@@ -791,6 +882,12 @@ async function loadFeatures() {
     }
   });
 }
+// 하천선 팝업 → 그 하천선에 귀속된 조사만 목록으로 표출
+function openFeatureRecords(featureId) {
+  map.closePopup();
+  listFilterFeatureId = featureId;
+  openList();
+}
 async function renameFeature(id) {
   const f = (await getAllFeatures()).find(x => x.id === id);
   if (!f) return;
@@ -798,12 +895,16 @@ async function renameFeature(id) {
   if (name === null) return;
   f.name = name.trim() || '무명 하천선';
   await putFeature(f);
-  await loadFeatures();
+  await loadMarkers();   // 마커 팝업의 하천명도 갱신되도록
 }
 async function removeFeature(id) {
-  if (!confirm('이 하천선을 삭제할까요?')) return;
+  if (!confirm('이 하천선을 삭제할까요? (귀속된 조사는 삭제되지 않고 귀속만 해제됩니다)')) return;
   await deleteFeature(id);
-  await loadFeatures();
+  // 이 하천선을 가리키던 기록의 귀속 해제(수동 지정 포함) 후 자동 기록 재계산
+  const refs = (await getAll()).filter(r => r.featureId === id);
+  for (const r of refs) { r.featureId = null; r.featureManual = false; r.featureAmbiguous = false; await putRecord(r); }
+  await recomputeAuto();
+  await loadMarkers();
 }
 
 // ========== 내 위치 ==========
@@ -843,6 +944,7 @@ function openForm() {
   document.getElementById('photoFile').value = '';
   clearSelectedLocation();
   document.getElementById('locConfirm').style.display = 'none';
+  populateFeatureSelect('auto');
   document.getElementById('formOverlay').classList.add('show');
 }
 function closeForm() {
@@ -867,6 +969,7 @@ function setPickedLocation(lat, lng, label) {
   showSelectedLocation(lat, lng);
   document.getElementById('formMeta').textContent =
     `${label}: ${lat.toFixed(6)}, ${lng.toFixed(6)} (등록 시 기록됨)`;
+  refreshAutoAttribution();   // 위치 확정 → 자동 귀속 대상 미리 표시
   document.getElementById('formOverlay').classList.remove('show');
   document.getElementById('locConfirm').style.display = 'block';
 }
@@ -958,7 +1061,8 @@ async function finishDrawRiver() {
     color: '#1e88e5', created: Date.now()
   });
   cancelDraw();
-  await loadFeatures();
+  await recomputeAuto();    // 새 하천선 반영 → 자동 귀속 기록 재계산
+  await loadMarkers();      // 마커 팝업의 하천명·라인 팝업 건수 갱신(loadFeatures 포함)
 }
 
 // 안내 배너 클릭 시 위치지정 취소하고 폼 복귀
@@ -1044,6 +1148,7 @@ async function handlePhotoFile(file) {
     showSelectedLocation(gps.lat, gps.lng);
     document.getElementById('formMeta').textContent =
       `📷 사진 위치정보 사용: ${gps.lat.toFixed(6)}, ${gps.lng.toFixed(6)} (등록 시 기록됨)`;
+    refreshAutoAttribution();
   } else if (!currentPos) {
     // 사진에 위치정보가 없음(안드로이드 갤러리는 EXIF GPS가 제거됨) → 수동 지정 안내
     document.getElementById('formMeta').textContent =
@@ -1067,6 +1172,61 @@ async function handlePhotoFile(file) {
 document.getElementById('photoCam').addEventListener('change', e => handlePhotoFile(e.target.files[0]));
 document.getElementById('photoFile').addEventListener('change', e => handlePhotoFile(e.target.files[0]));
 
+// 폼의 '귀속 하천선' 드롭다운 채우기. selectedVal: 'auto' | featureId | '' (없음)
+async function populateFeatureSelect(selectedVal) {
+  const field = document.getElementById('featureField');
+  const sel = document.getElementById('featureInput');
+  const feats = (await getAllFeatures())
+    .filter(f => f.projectId === currentProjectId && f.type === 'line');
+  if (!feats.length) {                       // 하천선이 없으면 귀속 UI 자체를 숨김
+    field.style.display = 'none';
+    document.getElementById('featureMeta').textContent = '';
+    return;
+  }
+  field.style.display = 'block';
+  sel.innerHTML =
+    `<option value="auto">자동 (가장 가까운 하천선)</option>` +
+    feats.map(f => `<option value="${f.id}">${f.name}</option>`).join('') +
+    `<option value="">없음 (귀속 안 함)</option>`;
+  sel.value = (selectedVal === undefined ? 'auto' : selectedVal);
+  if (sel.selectedIndex < 0) sel.value = 'auto';   // 삭제된 featureId 대비
+  refreshAutoAttribution();
+}
+// '자동'일 때 현재 위치 기준으로 어느 하천선에 묶일지 미리 표시 (교차부 모호성 경고 포함)
+async function refreshAutoAttribution() {
+  const sel = document.getElementById('featureInput');
+  const meta = document.getElementById('featureMeta');
+  if (!sel || document.getElementById('featureField').style.display === 'none') return;
+  if (sel.value !== 'auto') {
+    meta.textContent = sel.value === '' ? '이 기록은 하천선에 귀속하지 않습니다.' : '수동 지정됨.';
+    meta.style.color = '#888';
+    return;
+  }
+  if (!currentPos) { meta.textContent = '위치를 지정하면 가장 가까운 하천선에 자동 귀속됩니다.'; meta.style.color = '#888'; return; }
+  const near = await nearestLineFeature(currentPos.lat, currentPos.lng, currentProjectId);
+  if (!near.feature) { meta.textContent = '가까운 하천선이 없습니다.'; meta.style.color = '#888'; return; }
+  const amb = isAmbiguous(near.dist, near.secondDist);
+  meta.innerHTML = `→ <b>${near.feature.name}</b>에 귀속 (약 ${Math.round(near.dist)}m)` +
+    (amb ? ` <span style="color:#e65100;">⚠ 갈래(${near.second?.name}) 인접 — 확인 권장</span>` : '');
+  meta.style.color = amb ? '#e65100' : '#1565c0';
+}
+// 폼 입력값을 기록에 반영(featureId·featureManual·featureAmbiguous)
+async function applyAttribution(rec) {
+  const field = document.getElementById('featureField');
+  const sel = document.getElementById('featureInput');
+  const val = (field.style.display !== 'none' && sel) ? sel.value : 'auto';
+  if (val === 'auto') {
+    const near = await nearestLineFeature(rec.lat, rec.lng, currentProjectId);
+    rec.featureId = near.feature ? near.feature.id : null;
+    rec.featureManual = false;
+    rec.featureAmbiguous = near.feature ? isAmbiguous(near.dist, near.secondDist) : false;
+  } else {
+    rec.featureId = val || null;     // '' → 없음
+    rec.featureManual = true;
+    rec.featureAmbiguous = false;
+  }
+}
+
 async function saveRecord() {
   if (!currentPos) {
     alert('위치 정보가 없습니다. 사진(위치정보 있는 JPG)·📍현재위치·🗺️지도지정 중 하나로 위치를 지정하세요.');
@@ -1086,6 +1246,7 @@ async function saveRecord() {
       lat: currentPos.lat, lng: currentPos.lng, kind, memo, photo: currentPhoto || null
     };
   }
+  await applyAttribution(rec);
   await putRecord(rec);
   const wasFromList = cameFromList;
   editId = null; cameFromList = false;
@@ -1142,12 +1303,21 @@ document.getElementById('bulkInput').addEventListener('change', async e => {
     //    좌표를 Number로 확정 + 무효 시 지도중심 폴백 (lat/lng 누락 저장 방지)
     let La = Number(lat), Ln = Number(lng);
     if (!isFinite(La) || !isFinite(Ln)) { La = Number(center.lat); Ln = Number(center.lng); locNote = '⚠위치없음(지도중심 임시·수정요망)'; }
+    // 자동 귀속: 위치가 있는(EXIF) 사진만 가장 가까운 하천선에 묶음(임시배치는 제외)
+    let fid = null, famb = false;
+    if (!locNote) {
+      try {
+        const near = await nearestLineFeature(La, Ln, currentProjectId);
+        if (near.feature) { fid = near.feature.id; famb = isAmbiguous(near.dist, near.secondDist); }
+      } catch (_) {}
+    }
     try {
       await withTimeout(putRecord({
         id: Date.now().toString() + '_' + i,
         projectId: currentProjectId,
         time: f.lastModified || Date.now(),
-        lat: La, lng: Ln, kind, memo: locNote, photo
+        lat: La, lng: Ln, kind, memo: locNote, photo,
+        featureId: fid, featureManual: false, featureAmbiguous: famb
       }), 15000);
       ok++;
       savedPts.push([La, Ln]);
@@ -1217,11 +1387,31 @@ async function removeFromMap(id) {
 let selectMode = false;
 let selectedIds = new Set();
 let listCache = [];
+let listFilterFeatureId = null;   // 하천선 귀속 필터(특정 하천선의 조사만 표시)
+let featNameById = {};            // 목록 행에 귀속 하천명 표시용
 
 async function openList() {
-  listCache = (await getAll()).filter(r => r.projectId === currentProjectId).sort((a, b) => b.time - a.time);
+  let recs = (await getAll()).filter(r => r.projectId === currentProjectId);
+  featNameById = {};
+  (await getAllFeatures()).filter(f => f.projectId === currentProjectId)
+    .forEach(f => { featNameById[f.id] = f.name; });
+  const bar = document.getElementById('listFilterBar');
+  if (listFilterFeatureId) {
+    const f = (await getAllFeatures()).find(x => x.id === listFilterFeatureId);
+    recs = recs.filter(r => r.featureId === listFilterFeatureId);
+    document.getElementById('listFilterLabel').textContent =
+      `🏞️ ${f ? f.name : '하천선'} 귀속 조사 ${recs.length}건`;
+    bar.style.display = 'flex';
+  } else {
+    bar.style.display = 'none';
+  }
+  listCache = recs.sort((a, b) => b.time - a.time);
   renderList();
   document.getElementById('listOverlay').classList.add('show');
+}
+function clearListFilter() {
+  listFilterFeatureId = null;
+  openList();
 }
 function renderList() {
   const body = document.getElementById('listBody');
@@ -1248,7 +1438,7 @@ function renderList() {
         ${chk}
         ${thumb}
         <div class="info">
-          <div class="t">${r.kind}</div>
+          <div class="t">${r.kind}${r.featureId && featNameById[r.featureId] ? ` <span style="color:#1565c0;font-weight:600;">· 🏞️ ${featNameById[r.featureId]}</span>` : ''}${r.featureAmbiguous ? ' <span style="color:#e65100;">⚠</span>' : ''}</div>
           <div class="s">${r.memo || '(메모 없음)'}</div>
           <div class="s">${when}</div>
         </div>
@@ -1258,7 +1448,10 @@ function renderList() {
   }
   updateSelCount();
 }
-function closeList() { document.getElementById('listOverlay').classList.remove('show'); }
+function closeList() {
+  document.getElementById('listOverlay').classList.remove('show');
+  listFilterFeatureId = null;   // 닫으면 필터 해제(다음에 목록 버튼으로 열면 전체)
+}
 function goTo(lat, lng) { closeList(); map.setView([lat, lng], 18); }
 
 async function editItem(id) {
@@ -1285,6 +1478,8 @@ async function editItem(id) {
     ? `수정 중 — 위치: ${la.toFixed(6)}, ${ln.toFixed(6)} (사진을 새로 올리면 교체, 🗺️로 위치 변경 가능)`
     : '⚠ 이 기록은 위치 정보가 없습니다. 🗺️ 지도에서 위치 지정으로 위치를 추가한 뒤 저장하세요.';
   if (hasLoc) map.setView([la, ln], Math.max(map.getZoom(), 16));
+  // 귀속 드롭다운: 수동 지정이면 그 값(또는 없음=''), 자동이면 'auto'
+  await populateFeatureSelect(rec.featureManual ? (rec.featureId || '') : 'auto');
   document.getElementById('formOverlay').classList.add('show');
 }
 async function removeItem(id) {
@@ -1347,8 +1542,14 @@ async function applyReassign() {
   if (!confirm(`${ids.length}건을 선택한 사업으로 이동합니다. 계속할까요?`)) return;
   const all = await getAll();
   for (const r of all) {
-    if (selectedIds.has(r.id)) { r.projectId = target; await putRecord(r); }
+    if (selectedIds.has(r.id)) {
+      r.projectId = target;
+      // 귀속 하천선은 사업별이므로 사업이 바뀌면 귀속 해제 후 대상 사업에서 재계산
+      r.featureId = null; r.featureManual = false; r.featureAmbiguous = false;
+      await putRecord(r);
+    }
   }
+  await recomputeAuto(target);   // 대상 사업의 하천선 기준 자동 귀속
   closeReassign();
   selectedIds.clear();
   renderProjectSelect(await getAllProjects());
@@ -1408,8 +1609,11 @@ async function exportCSV() {
 
 async function exportJSON() {
   const all = await getAll();
-  if (!all.length) { alert('등록된 데이터가 없습니다.'); return; }
-  const json = JSON.stringify(all, null, 2);
+  const feats = await getAllFeatures();
+  if (!all.length && !feats.length) { alert('등록된 데이터가 없습니다.'); return; }
+  // 신형식: records + features(하천선) 함께 내보내 귀속(featureId)이 백업·이관에서 유지됨
+  const payload = { app: 'fieldSurvey', version: 3, exportedAt: Date.now(), records: all, features: feats };
+  const json = JSON.stringify(payload, null, 2);
   await shareOrDownload(new Blob([json], { type: 'application/json' }), '현장조사_백업_' + dateTag() + '.json');
 }
 
@@ -1418,17 +1622,28 @@ async function importJSON(e) {
   if (!file) return;
   e.target.value = '';
   const text = await file.text();
-  let records;
-  try { records = JSON.parse(text); } catch { alert('JSON 파일을 읽을 수 없습니다.'); return; }
-  if (!Array.isArray(records)) { alert('올바른 백업 파일이 아닙니다.'); return; }
-  if (!confirm(`${records.length}건을 현재 사업으로 복원합니다. 기존 데이터에 추가(덮어쓰기)됩니다. 계속할까요?`)) return;
+  let data;
+  try { data = JSON.parse(text); } catch { alert('JSON 파일을 읽을 수 없습니다.'); return; }
+  // 하위호환: 배열=구형식(records만) / 객체=신형식({records, features})
+  let records, features;
+  if (Array.isArray(data)) { records = data; features = []; }
+  else if (data && Array.isArray(data.records)) { records = data.records; features = data.features || []; }
+  else { alert('올바른 백업 파일이 아닙니다.'); return; }
+  const msg = `조사 ${records.length}건` + (features.length ? ` · 하천선 ${features.length}개` : '') +
+    `를 현재 사업으로 복원합니다. 기존 데이터에 추가(덮어쓰기)됩니다. 계속할까요?`;
+  if (!confirm(msg)) return;
   const ids = new Set((await getAllProjects()).map(p => p.id));
+  // 하천선(features) 먼저 복원 — id는 유지, projectId만 현재 사업으로(귀속 featureId 링크 보존)
+  for (const f of features) {
+    if (!f.projectId || !ids.has(f.projectId)) f.projectId = currentProjectId;
+    await putFeature(f);
+  }
   for (const r of records) {
     if (!r.projectId || !ids.has(r.projectId)) r.projectId = currentProjectId;
     await putRecord(r);
   }
   await loadMarkers();
-  alert(`${records.length}건 복원 완료.`);
+  alert(`복원 완료 — 조사 ${records.length}건` + (features.length ? `, 하천선 ${features.length}개` : '') + '.');
   closeExport();
 }
 
