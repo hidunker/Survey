@@ -8,6 +8,13 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>현장조사</title>
+<!-- 홈 화면에 추가 시 '독립 앱'처럼 실행(브라우저 주소창·뒤로가기 사고 줄임) — 명세 §10.16 -->
+<meta name="theme-color" content="#1565c0">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="현장조사">
+<link rel="manifest" href='data:application/manifest+json,{"name":"%ED%98%84%EC%9E%A5%EC%A1%B0%EC%82%AC","short_name":"%ED%98%84%EC%9E%A5%EC%A1%B0%EC%82%AC","start_url":".","scope":".","display":"standalone","background_color":"%231565c0","theme_color":"%231565c0"}'>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -105,42 +112,22 @@
   }
   .fab:active { background: #0d47a1; }
 
-  .locate-btn {
-    position: fixed; bottom: 100px; right: 16px; z-index: 1000;
-    width: 48px; height: 48px; border-radius: 50%; border: none;
-    background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-    font-size: 22px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  /* 우측 기능 버튼 스택(아이콘+명칭). 아래→위로 쌓이고, 맨 아래가 현위치 */
+  .fab-stack {
+    position: fixed; right: 12px; bottom: 90px; z-index: 1000;
+    display: flex; flex-direction: column; gap: 9px; align-items: flex-end;
   }
-  .list-btn {
-    position: fixed; bottom: 158px; right: 16px; z-index: 1000;
-    width: 48px; height: 48px; border-radius: 50%; border: none;
-    background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-    font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  .fab-item { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+  .fab-item .fi-label {
+    background: rgba(255,255,255,0.93); color: #1a1a1a; font-size: 12px; font-weight: 700;
+    padding: 4px 9px; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.22); white-space: nowrap;
   }
-  .export-btn {
-    position: fixed; bottom: 216px; right: 16px; z-index: 1000;
-    width: 48px; height: 48px; border-radius: 50%; border: none;
-    background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-    font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  .fab-item .fi-icon {
+    width: 46px; height: 46px; border-radius: 50%; background: #fff; flex-shrink: 0;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.25); font-size: 20px;
+    display: flex; align-items: center; justify-content: center;
   }
-  .bulk-btn {
-    position: fixed; bottom: 274px; right: 16px; z-index: 1000;
-    width: 48px; height: 48px; border-radius: 50%; border: none;
-    background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-    font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center;
-  }
-  .draw-btn {
-    position: fixed; bottom: 332px; right: 16px; z-index: 1000;
-    width: 48px; height: 48px; border-radius: 50%; border: none;
-    background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-    font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center;
-  }
-  .layer-btn {
-    position: fixed; bottom: 390px; right: 16px; z-index: 1000;
-    width: 48px; height: 48px; border-radius: 50%; border: none;
-    background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-    font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center;
-  }
+  .fab-item:active .fi-icon { background: #eef0f3; }
   /* 레이어 시트 행(배경지도 라디오 / 오버레이·참조레이어 체크박스) */
   .lay-row {
     display: flex; align-items: center; gap: 10px; padding: 11px 4px;
@@ -309,7 +296,8 @@
     display: none; background: #1565c0; color: #fff; padding: 10px 16px; border-radius: 20px;
     font-size: 14px; font-weight: 600; box-shadow: 0 3px 10px rgba(0,0,0,0.3); white-space: nowrap;
   }
-  #drawHint { background: #1e88e5; }
+  #drawHint { background: #1e88e5; white-space: normal; max-width: 92vw; text-align: center; }
+  #pickHint { white-space: normal; max-width: 92vw; text-align: center; }
   #locConfirm { background: #2e7d32; cursor: pointer; max-width: 92vw; white-space: normal; text-align: center; }
 
   /* 사진 확대 — 반화면 플로팅 패널 (모달 아님: 지도 조작 유지) */
@@ -381,12 +369,15 @@
   <button class="d-ok" onclick="finishDrawRiver()">완료</button>
 </div>
 
-<button class="layer-btn" onclick="openLayer()" title="레이어 (배경지도·참조도형)">🗺️</button>
-<button class="draw-btn" onclick="startDrawRiver()" title="도형 그리기 (선·구역)">🏞️</button>
-<button class="bulk-btn" onclick="openBulk()" title="사진 일괄 등록">🗂️</button>
-<button class="export-btn" onclick="openExport()" title="내보내기·관리">📤</button>
-<button class="list-btn" onclick="openList()" title="목록">📋</button>
-<button class="locate-btn" onclick="locateMe()" title="내 위치">📍</button>
+<!-- 우측 기능 버튼 스택 — 아이콘 옆에 명칭(스마트폰엔 마우스오버가 없어 라벨로 안내) -->
+<div class="fab-stack">
+  <div class="fab-item" onclick="openLayer()"><span class="fi-label">배경·레이어</span><span class="fi-icon">🗺️</span></div>
+  <div class="fab-item" onclick="startDrawRiver()"><span class="fi-label">선·구역</span><span class="fi-icon">🏞️</span></div>
+  <div class="fab-item" onclick="openBulk()"><span class="fi-label">사진일괄</span><span class="fi-icon">🗂️</span></div>
+  <div class="fab-item" onclick="openExport()"><span class="fi-label">내보내기</span><span class="fi-icon">📤</span></div>
+  <div class="fab-item" onclick="openList()"><span class="fi-label">목록</span><span class="fi-icon">📋</span></div>
+  <div class="fab-item" onclick="locateMe()"><span class="fi-label">현위치</span><span class="fi-icon">📍</span></div>
+</div>
 <button class="fab" onclick="openForm()">+ 조사 등록</button>
 
 <!-- 사진 확대 패널 (반화면, 모달 아님) -->
@@ -646,7 +637,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ========== 공통 상수 ==========
-const BUILD = '2026-06-28a (도형 선/구역 작도 + point-in-polygon 귀속 + 레이어 통합버튼 + 목록 내 DXF/SHP 이동·삭제)';
+const BUILD = '2026-06-28b (FAB 라벨·레이어 상단이동 + 일반도 hatch 진하게 + 배너 줄바꿈 + 홈화면앱/뒤로가기 가드)';
 console.log('현장조사 build:', BUILD);
 const KINDS = ['하천', '소하천', '댐지점', '구조물', '불법시설물', '기타'];
 function kindOptions(sel) {
@@ -1215,12 +1206,15 @@ function dxfToShapes(dxf, srcDef) {
   return out;
 }
 
-let overlayCtrlLayers = {};      // overlayId → Leaflet layer (좌측 패널에서 토글)
+let overlayCtrlLayers = {};      // overlayId → Leaflet layer (레이어 시트에서 토글)
+// ★ 채움(hatch) 투명도 배경 적응(28b): 일반도에선 옅으면 안 보여 진하게(+10%p), 위성은 유지
+function refFill() { return isSatellite ? 0.12 : 0.22; }
 function buildDxfLayer(shapes) {
   const g = L.layerGroup();
+  const fo = refFill();
   (shapes || []).forEach(s => {
     if (s.k === 'line') L.polyline(s.pts, { renderer: refRenderer, color: s.color, weight: 1.5, opacity: 0.95 }).addTo(g);
-    else if (s.k === 'poly') L.polygon(s.pts, { renderer: refRenderer, color: s.color, weight: 1.5, opacity: 0.95, fillOpacity: 0.12 }).addTo(g);
+    else if (s.k === 'poly') L.polygon(s.pts, { renderer: refRenderer, color: s.color, weight: 1.5, opacity: 0.95, fillOpacity: fo }).addTo(g);
     else if (s.k === 'pt') L.circleMarker(s.pts[0], { renderer: refRenderer, radius: 3, color: s.color, weight: 2, fillOpacity: 0.9 }).addTo(g);
   });
   return g;
@@ -1228,9 +1222,10 @@ function buildDxfLayer(shapes) {
 function shpColor() { return isSatellite ? '#00e5ff' : '#14315e'; }   // 배경적응: 위성=시안 / 일반=남색(+pane 외곽선)
 function buildShpLayer(geojson) {
   const col = shpColor();
+  const fo = refFill();
   return L.geoJSON(geojson, {
     renderer: refRenderer,
-    style: () => ({ color: col, weight: 1.4, opacity: 0.95, fillColor: col, fillOpacity: 0.10 }),
+    style: () => ({ color: col, weight: 1.4, opacity: 0.95, fillColor: col, fillOpacity: fo }),
     pointToLayer: (f, latlng) => L.circleMarker(latlng, { renderer: refRenderer, radius: 3, color: col, weight: 2, fillOpacity: 0.9 })
   });
 }
@@ -2353,6 +2348,40 @@ function dateTag() {
   return new Date().toISOString().slice(0, 10).replace(/-/g, '');
 }
 
+// ========== 뒤로가기 오종료 방지 (28b) ==========
+// 스마트폰에서 뒤로가기 한 번에 앱이 꺼지는 불편 방지.
+//  - 열려 있는 시트/패널/작도 모드가 있으면 뒤로가기는 그것만 닫음.
+//  - 아무것도 안 열려 있으면 종료되지 않게 가드를 다시 심고 안내 토스트.
+function fsToast(msg) {
+  let t = document.getElementById('fsToast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'fsToast';
+    t.style.cssText = 'position:fixed;left:50%;bottom:160px;transform:translateX(-50%);background:rgba(0,0,0,0.82);color:#fff;padding:10px 16px;border-radius:20px;font-size:13px;z-index:4000;max-width:90vw;text-align:center;pointer-events:none;';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg; t.style.display = 'block';
+  clearTimeout(t._h); t._h = setTimeout(() => { t.style.display = 'none'; }, 1800);
+}
+function closeAnyOpenUI() {
+  let closed = false;
+  ['formOverlay', 'listOverlay', 'exportOverlay', 'bulkOverlay', 'layerOverlay', 'reassignOverlay', 'kindOverlay'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el.classList.contains('show')) { el.classList.remove('show'); closed = true; }
+  });
+  const pp = document.getElementById('photoPanel');
+  if (pp && pp.style.display === 'flex') { closePhotoView(); closed = true; }
+  if (typeof drawing !== 'undefined' && drawing) { cancelDraw(); closed = true; }
+  if (typeof pickingLocation !== 'undefined' && pickingLocation) { map.off('click'); finishPick(); closed = true; }
+  return closed;
+}
+function armBackGuard() { try { history.pushState({ fs: 1 }, ''); } catch (_) {} }
+window.addEventListener('popstate', () => {
+  const closed = closeAnyOpenUI();
+  armBackGuard();
+  if (!closed) fsToast('뒤로가기로는 종료되지 않습니다 (탭/창을 닫아 종료)');
+});
+
 // ========== 간이 로그인 (가림막) ==========
 // ※ 클라이언트 코드라 진짜 보안은 아님(아는 사람끼리 공유용 외부인 차단). 정식 인증은 서버(P7).
 const AUTH = { id: '수자원', pw: '본부123!' };
@@ -2365,6 +2394,7 @@ function startApp() {
   // 로그인 오버레이가 사라진 뒤 지도 크기 재계산(일부 안드로이드 크롬에서 초기 렌더 안정화)
   setTimeout(() => map.invalidateSize(), 200);
   initDB();
+  armBackGuard();     // 뒤로가기 오종료 방지 가드 1개 심기
 }
 function togglePw(visible) {
   document.getElementById('loginPw').type = visible ? 'text' : 'password';
