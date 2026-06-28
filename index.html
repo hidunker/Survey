@@ -135,6 +135,22 @@
     background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.25);
     font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center;
   }
+  .layer-btn {
+    position: fixed; bottom: 390px; right: 16px; z-index: 1000;
+    width: 48px; height: 48px; border-radius: 50%; border: none;
+    background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+  /* 레이어 시트 행(배경지도 라디오 / 오버레이·참조레이어 체크박스) */
+  .lay-row {
+    display: flex; align-items: center; gap: 10px; padding: 11px 4px;
+    border-bottom: 1px solid #f0f2f5; font-size: 15px; cursor: pointer;
+  }
+  .lay-row:last-child { border-bottom: none; }
+  .lay-row input { width: 20px; height: 20px; flex-shrink: 0; margin: 0; }
+  .lay-row .lay-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lay-row .lay-del { color: #d32f2f; font-size: 16px; flex-shrink: 0; padding: 2px 6px; cursor: pointer; }
+  .lay-empty { color: #999; font-size: 13px; padding: 8px 4px; }
   /* 하천선 그리기 컨트롤 바 */
   #drawBar {
     position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%); z-index: 1900;
@@ -278,6 +294,14 @@
   .list-item .memo { color: #1565c0; font-size: 12px; padding: 5px 8px; cursor: pointer; border: 1px solid #cfe0f5; border-radius: 6px; text-align: center; }
   /* 목록이 길어도 상단 닫기(✕)·하단 닫기 버튼이 항상 보이도록 내부 스크롤 */
   #listBody { max-height: 56vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  /* 목록 내 참조 레이어(DXF/SHP) 섹션 */
+  #listLayerSection { margin-bottom: 12px; }
+  #listLayerSection .ll-head { font-size: 13px; font-weight: 700; color: #1565c0; margin-bottom: 6px; }
+  #listLayerSection .ll-row {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin-bottom: 6px;
+    background: #f3f7fd; border: 1px solid #d9e6f7; border-radius: 8px;
+  }
+  #listLayerSection .ll-name { flex: 1; min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* 위치 지정 / 하천선 그리기 / 위치 확인 안내 배너 */
   #pickHint, #drawHint, #locConfirm {
@@ -344,13 +368,9 @@
 <div id="map"></div>
 <div id="cadastralNote" style="display:none;position:fixed;left:8px;bottom:60px;z-index:1100;background:rgba(183,28,28,0.92);color:#fff;font-size:11px;font-weight:700;padding:5px 9px;border-radius:6px;max-width:62vw;box-shadow:0 1px 4px rgba(0,0,0,0.3);line-height:1.35;">⚠ 지적도=참고용 · 성과품은 지자체 취득 지적 사용</div>
 
-<!-- 좌측 참조 레이어(DXF/SHP) 패널 -->
-<div id="overlayPanel">
-  <div class="ovp-head">📂 참조 레이어 (DXF/SHP)</div>
-  <div id="overlayPanelBody"></div>
-</div>
+<!-- (구 좌측 참조 레이어 패널 제거 → 우측 🗺️ 레이어 버튼 + 하단 레이어 시트로 통합) -->
 <div id="pickHint">🗺️ 지도를 탭/클릭해 위치를 지정하세요 (취소: 위 닫기)</div>
-<div id="drawHint">🏞️ 선형(하천·도로 등): 지도를 클릭해 경로를 이어 그리고 [완료]를 누르세요</div>
+<div id="drawHint">🏞️ 도형(선·구역): 지도를 클릭해 경로/외곽을 이어 찍고 [완료] → 선/구역 선택</div>
 <div id="locConfirm">📍 위치 지정됨 — 지도의 핀 확인 후 여기를 탭하여 등록 계속 ▶</div>
 
 <!-- 하천선 그리기 컨트롤 바 -->
@@ -361,7 +381,8 @@
   <button class="d-ok" onclick="finishDrawRiver()">완료</button>
 </div>
 
-<button class="draw-btn" onclick="startDrawRiver()" title="선형 그리기 (하천·도로 등)">🏞️</button>
+<button class="layer-btn" onclick="openLayer()" title="레이어 (배경지도·참조도형)">🗺️</button>
+<button class="draw-btn" onclick="startDrawRiver()" title="도형 그리기 (선·구역)">🏞️</button>
 <button class="bulk-btn" onclick="openBulk()" title="사진 일괄 등록">🗂️</button>
 <button class="export-btn" onclick="openExport()" title="내보내기·관리">📤</button>
 <button class="list-btn" onclick="openList()" title="목록">📋</button>
@@ -376,6 +397,31 @@
     <button class="pp-close" onclick="closePhotoView()">닫기 ✕</button>
   </div>
   <div class="pp-body"><img id="ppImg" src="" alt=""></div>
+</div>
+
+<!-- 레이어 (배경지도 + 오버레이 + 참조 도형 DXF/SHP) 통합 시트 -->
+<div class="overlay" id="layerOverlay">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <button class="sheet-close" onclick="closeLayer()" title="닫기">✕</button>
+    <h2>레이어</h2>
+    <div class="field">
+      <label>배경지도</label>
+      <div id="baseList"></div>
+    </div>
+    <div class="field">
+      <label>오버레이</label>
+      <label class="lay-row"><input type="checkbox" id="ovHybrid" onchange="toggleHybrid(this.checked)"><span class="lay-name">위성 지명·경계</span></label>
+      <label class="lay-row"><input type="checkbox" id="ovCadastral" onchange="toggleCadastral(this.checked)"><span class="lay-name">지적도 (참고용·VWorld)</span></label>
+    </div>
+    <div class="field">
+      <label>참조 레이어 (DXF/SHP) <span style="font-weight:400;font-size:12px;color:#888;">— 끄고켜기·삭제</span></label>
+      <div id="layerRefList"></div>
+    </div>
+    <div class="row-btns">
+      <button class="btn-cancel" onclick="closeLayer()">닫기</button>
+    </div>
+  </div>
 </div>
 
 <!-- 사진 일괄 등록 -->
@@ -425,7 +471,7 @@
     </div>
 
     <div class="field" id="featureField" style="display:none;">
-      <label>귀속 선형(하천·도로 등) <span style="font-weight:400;font-size:12px;color:#888;">(가까운 선형에 자동으로 묶임 · 수정 가능)</span></label>
+      <label>귀속 도형(선·구역) <span style="font-weight:400;font-size:12px;color:#888;">(포함 구역 또는 가까운 선에 자동으로 묶임 · 수정 가능)</span></label>
       <select id="featureInput" onchange="refreshAutoAttribution()"></select>
       <div class="meta" id="featureMeta"></div>
     </div>
@@ -454,6 +500,8 @@
     <div class="sheet-handle"></div>
     <button class="sheet-close" onclick="closeList()" title="닫기">✕</button>
     <h2>조사 목록</h2>
+
+    <div id="listLayerSection"></div>
 
     <div id="listFilterBar" style="display:none; align-items:center; gap:8px; background:#e8f1fb; border:1px solid #cfe0f5; border-radius:8px; padding:8px 10px; margin-bottom:10px; font-size:13px;">
       <span id="listFilterLabel" style="flex:1; color:#1565c0; font-weight:700;"></span>
@@ -559,7 +607,7 @@
       <div class="icon">📐</div>
       <div>
         <div class="label">DXF 올리기 (설계도면)</div>
-        <div class="desc">업로드 시 원점 선택(5185 서부 / 5186 중부 / 5187 동부 / 5188 동해). 우측 레이어 목록에서 토글</div>
+        <div class="desc">업로드 시 원점 선택(5185 서부 / 5186 중부 / 5187 동부 / 5188 동해). 🗺️ 레이어 버튼에서 토글</div>
       </div>
     </div>
     <input type="file" id="dxfInput" accept=".dxf" style="display:none" onchange="uploadDxf(this.files[0]); this.value=''">
@@ -567,11 +615,11 @@
       <div class="icon">🗺️</div>
       <div>
         <div class="label">SHP 올리기 (.zip)</div>
-        <div class="desc">.shp/.dbf/.prj 가 담긴 zip — 좌표계(.prj) 자동 인식. 우측 레이어 목록에서 토글</div>
+        <div class="desc">.shp/.dbf/.prj 가 담긴 zip — 좌표계(.prj) 자동 인식. 🗺️ 레이어 버튼에서 토글</div>
       </div>
     </div>
     <input type="file" id="shpInput" accept=".zip" style="display:none" onchange="uploadShp(this.files[0]); this.value=''">
-    <div style="font-size:11px;color:#b71c1c;margin:2px 0 6px;">⚠ 개발단계 — 너무 무거운(수만 요소) DXF/SHP는 앱이 느려질 수 있어 지양 권장. 올린 레이어는 <b>좌측 "참조 레이어" 패널</b>에서 끄고켜기·삭제.</div>
+    <div style="font-size:11px;color:#b71c1c;margin:2px 0 6px;">⚠ 개발단계 — 너무 무거운(수만 요소) DXF/SHP는 앱이 느려질 수 있어 지양 권장. 올린 레이어는 <b>🗺️ 레이어 버튼</b>에서 끄고켜기·삭제, <b>📋 목록</b>에서 사업 이동·복사.</div>
 
     <div class="section-cap">데이터 삭제 (되돌릴 수 없음)</div>
     <div class="export-option danger" onclick="clearCurrentProject()">
@@ -598,7 +646,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ========== 공통 상수 ==========
-const BUILD = '2026-06-27f (DXF/SHP를 JSON 백업에 포함 + 좌측 참조레이어 패널 on/off·삭제 + 지적 위성 투명도↑)';
+const BUILD = '2026-06-28a (도형 선/구역 작도 + point-in-polygon 귀속 + 레이어 통합버튼 + 목록 내 DXF/SHP 이동·삭제)';
 console.log('현장조사 build:', BUILD);
 const KINDS = ['하천', '소하천', '댐지점', '구조물', '불법시설물', '기타'];
 function kindOptions(sel) {
@@ -658,7 +706,35 @@ cadastral.on('add', onCadastralOn);
 cadastral.on('remove', onCadastralOff);
 
 const overlays = { '위성 지명·경계': vHybrid, '지적도 (참고용·VWorld)': cadastral };
-const layerControl = L.control.layers(baseLayers, overlays, { position: 'topright', collapsed: false }).addTo(map);
+// ★ 레이어 통합 버튼(28a): 기본 Leaflet 컨트롤 대신 🗺️ 레이어 버튼 → 하단 시트로 통합
+//   (스마트폰에서 좌·우 패널이 동시에 펼쳐져 지도를 가리던 간섭 해소 — 명세 §10.11)
+const BASE_LAYERS = {
+  vbase: { label: '일반지도 (VWorld)', layer: vBase,   sat: false },
+  vsat:  { label: '위성 (VWorld)',     layer: vSat,    sat: true  },
+  osm:   { label: '일반지도 (OSM)',    layer: osm,     sat: false },
+  esri:  { label: '위성 (Esri)',       layer: esriSat, sat: true  },
+};
+let currentBaseKey = 'vbase';
+function selectBase(key) {
+  const def = BASE_LAYERS[key];
+  if (!def) return;
+  Object.values(BASE_LAYERS).forEach(d => { if (map.hasLayer(d.layer)) map.removeLayer(d.layer); });
+  def.layer.addTo(map);
+  if (def.layer.bringToBack) def.layer.bringToBack();   // 배경은 항상 맨 아래
+  currentBaseKey = key;
+  onBaseChanged(def.sat);
+}
+// 배경 변경 후 일괄 재스타일(구 baselayerchange 핸들러를 함수화)
+function onBaseChanged(sat) {
+  isSatellite = sat;
+  if (sat && document.getElementById('ovHybrid') && document.getElementById('ovHybrid').checked && !map.hasLayer(vHybrid)) vHybrid.addTo(map);
+  if (!sat && map.hasLayer(vHybrid)) map.removeLayer(vHybrid);
+  applyMarkerStyles();
+  applyCadastralStyle();
+  applyRefShapeStyle();
+  loadFeatures();            // 선형/구역 위성 흰 글로우(halo) 재적용
+  loadOverlays();            // SHP 배경적응 색 재적용
+}
 
 // 참조 도형(DXF/SHP) 전용 pane — SVG 렌더러로 두어 위성에서 외곽선 글로우(CSS filter) 일괄 적용
 map.createPane('refShapes');
@@ -724,17 +800,7 @@ function applyRefShapeStyle() {
   if (p) p.style.filter = isSatellite
     ? 'drop-shadow(0 0 1px rgba(0,0,0,0.95)) drop-shadow(0 0 1px rgba(0,0,0,0.95))' : '';
 }
-map.on('baselayerchange', e => {
-  const sat = e.name.includes('위성');
-  isSatellite = sat;
-  if (sat && !map.hasLayer(vHybrid)) vHybrid.addTo(map);
-  if (!sat && map.hasLayer(vHybrid)) map.removeLayer(vHybrid);
-  applyMarkerStyles();
-  applyCadastralStyle();
-  applyRefShapeStyle();
-  loadFeatures();            // 선형 위성 흰 글로우(halo) 재적용
-  loadOverlays();            // SHP 배경적응 색 재적용
-});
+// (배경 전환 로직은 selectBase()→onBaseChanged()로 이동 — 위 레이어 통합 버튼 참조)
 
 let myMarker = null;
 let selMarker = null;   // 등록 위치 지정 시 지도에 보여줄 핀
@@ -869,6 +935,34 @@ async function nearestLineFeature(lat, lng, projectId) {
   }
   return { feature: best, dist: bestD, second, secondDist: secondD, count: feats.length };
 }
+// ===== 구역(폴리곤) 포함 판정 (point-in-polygon, ray casting) =====
+function pointInPolygon(lat, lng, coords) {
+  let inside = false;
+  for (let i = 0, j = coords.length - 1; i < coords.length; j = i++) {
+    const yi = coords[i][0], xi = coords[i][1], yj = coords[j][0], xj = coords[j][1];
+    if (((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+// 폴리곤 면적(상대 비교용 — 작은 구역 우선 판정). 단위 무관(위경도 shoelace).
+function polyArea(coords) {
+  let a = 0;
+  for (let i = 0, j = coords.length - 1; i < coords.length; j = i++)
+    a += (coords[j][1] + coords[i][1]) * (coords[j][0] - coords[i][0]);
+  return Math.abs(a / 2);
+}
+// ★ 통합 귀속(28a): 포함하는 구역(폴리곤)이 있으면 우선(가장 작은 구역), 없으면 최근접 선형.
+//   반환 mode='polygon'|'line' — 모호성 경고는 선형(line)에만 적용.
+async function nearestFeature(lat, lng, projectId) {
+  const feats = (await getAllFeatures()).filter(f => f.projectId === projectId && Array.isArray(f.coords));
+  const polys = feats.filter(f => f.type === 'polygon' && f.coords.length >= 3 && pointInPolygon(lat, lng, f.coords));
+  if (polys.length) {
+    polys.sort((a, b) => polyArea(a.coords) - polyArea(b.coords));   // 세부 구역이 광역보다 구체적 → 우선
+    return { feature: polys[0], dist: 0, second: polys[1] || null, secondDist: 0, count: feats.length, mode: 'polygon' };
+  }
+  const near = await nearestLineFeature(lat, lng, projectId);
+  return { ...near, mode: 'line' };
+}
 // ⚠ T자/X자 교차부 모호성: 1·2순위 거리차가 작으면 자동귀속이 불확실 → 사용자 확인 권장 플래그.
 //   (근본 해법은 명세 §10 — 측점·방향 기반 매칭. 현재는 단순 최근접 + 모호성 경고 + 수동 변경.)
 function isAmbiguous(bestD, secondD) {
@@ -881,9 +975,9 @@ async function recomputeAuto(projectId = currentProjectId) {
   for (const r of recs) {
     const la = Number(r.lat), ln = Number(r.lng);
     if (!isFinite(la) || !isFinite(ln)) continue;
-    const near = await nearestLineFeature(la, ln, projectId);
+    const near = await nearestFeature(la, ln, projectId);
     const newId = near.feature ? near.feature.id : null;
-    const amb = near.feature ? isAmbiguous(near.dist, near.secondDist) : false;
+    const amb = (near.feature && near.mode === 'line') ? isAmbiguous(near.dist, near.secondDist) : false;
     if (r.featureId !== newId || !!r.featureAmbiguous !== amb) {
       r.featureId = newId; r.featureAmbiguous = amb;
       await putRecord(r);
@@ -1027,6 +1121,28 @@ async function loadFeatures() {
       // 라인을 탭/클릭하면 팝업이 바로 뜨도록(모바일에서 얇은 선도 누르기 쉽게 보조)
       pl.on('click', () => pl.openPopup());
       featureLayers.push(pl);
+    } else if (f.type === 'polygon' && Array.isArray(f.coords) && f.coords.length >= 3) {
+      const cat = f.category || '기타';
+      const color = f.color || featColor(cat);
+      if (isSatellite) {   // 위성 배경에서 외곽선이 묻히지 않게 흰 글로우
+        const halo = L.polygon(f.coords, { color: '#ffffff', weight: 7, opacity: 0.5, fill: false, interactive: false }).addTo(map);
+        featureLayers.push(halo);
+      }
+      const pg = L.polygon(f.coords, { color, weight: 3, opacity: 0.95, fillColor: color, fillOpacity: 0.12, lineJoin: 'round' }).addTo(map);
+      const n = cntById[f.id] || 0;
+      const bundle = n
+        ? `<span style="color:#1565c0;cursor:pointer;font-weight:700;" onclick="openFeatureRecords('${f.id}')">📋 포함 조사 ${n}건 보기</span><br>`
+        : `<span style="color:#888;">포함된 조사 없음</span><br>`;
+      pg.bindPopup(
+        `<b>${featIcon(cat)} ${esc(f.name)}</b> <span style="color:#888;">(구역)</span><br>` +
+        `<small>폴리곤 · ${f.coords.length}점 · <span style="color:#1565c0;cursor:pointer;" onclick="cycleFeatureCategory('${f.id}')">유형변경</span></small><br>` +
+        bundle +
+        `<span style="color:#1565c0;cursor:pointer;font-weight:700;" onclick="renameFeature('${f.id}')">✏️ 이름 수정</span>` +
+        ` &nbsp;·&nbsp; ` +
+        `<span style="color:#d32f2f;cursor:pointer;font-weight:700;" onclick="removeFeature('${f.id}')">🗑 삭제</span>`
+      );
+      pg.on('click', () => pg.openPopup());
+      featureLayers.push(pg);
     }
   });
 }
@@ -1132,23 +1248,44 @@ async function loadOverlays() {
     if (o.visible !== false) lyr.addTo(map);
   }
   applyRefShapeStyle();
-  await renderOverlayPanel();
+  await renderLayerRefList();
 }
-// 좌측 참조 레이어 패널 (DXF/SHP on/off + 삭제)
-async function renderOverlayPanel() {
-  const panel = document.getElementById('overlayPanel');
-  const body = document.getElementById('overlayPanelBody');
-  if (!panel || !body) return;
+// ===== 레이어 통합 시트 (배경지도 + 오버레이 + 참조 레이어) =====
+function openLayer() {
+  renderBaseList();
+  const h = document.getElementById('ovHybrid'), c = document.getElementById('ovCadastral');
+  if (h) h.checked = map.hasLayer(vHybrid);
+  if (c) c.checked = map.hasLayer(cadastral);
+  renderLayerRefList();
+  document.getElementById('layerOverlay').classList.add('show');
+}
+function closeLayer() { document.getElementById('layerOverlay').classList.remove('show'); }
+function renderBaseList() {
+  const el = document.getElementById('baseList');
+  if (!el) return;
+  el.innerHTML = Object.entries(BASE_LAYERS).map(([k, d]) =>
+    `<label class="lay-row"><input type="radio" name="baselayer" ${k === currentBaseKey ? 'checked' : ''} onchange="selectBase('${k}')"><span class="lay-name">${d.label}</span></label>`
+  ).join('');
+}
+function toggleHybrid(on) {
+  if (on) { if (!map.hasLayer(vHybrid)) vHybrid.addTo(map); }
+  else if (map.hasLayer(vHybrid)) map.removeLayer(vHybrid);
+}
+function toggleCadastral(on) {
+  if (on) { if (!map.hasLayer(cadastral)) cadastral.addTo(map); }
+  else if (map.hasLayer(cadastral)) map.removeLayer(cadastral);
+}
+// 참조 레이어(DXF/SHP) 끄고켜기 + 삭제 — 레이어 시트 안에 렌더
+async function renderLayerRefList() {
+  const body = document.getElementById('layerRefList');
+  if (!body) return;
   const ovs = (await getAllOverlays()).filter(o => o.projectId === currentProjectId);
-  if (!ovs.length) { panel.style.display = 'none'; return; }
-  panel.style.display = 'block';
+  if (!ovs.length) { body.innerHTML = '<div class="lay-empty">업로드된 참조 레이어가 없습니다. (내보내기 📤 → DXF/SHP 올리기)</div>'; return; }
   body.innerHTML = ovs.map(o => `
-    <div class="ov-row">
-      <label class="ov-toggle">
-        <input type="checkbox" ${o.visible !== false ? 'checked' : ''} onchange="toggleOverlay('${o.id}', this.checked)">
-        <span class="ov-name">${o.kind === 'dxf' ? '📐' : '🗺️'} ${esc(o.name)}</span>
-      </label>
-      <span class="ov-del" onclick="removeOverlay('${o.id}')" title="삭제">🗑</span>
+    <div class="lay-row">
+      <input type="checkbox" ${o.visible !== false ? 'checked' : ''} onchange="toggleOverlay('${o.id}', this.checked)">
+      <span class="lay-name">${o.kind === 'dxf' ? '📐' : '🗺️'} ${esc(o.name)}</span>
+      <span class="lay-del" onclick="removeOverlay('${o.id}')" title="삭제">🗑</span>
     </div>`).join('');
 }
 async function toggleOverlay(id, on) {
@@ -1165,7 +1302,7 @@ async function saveOverlay(o) {
       !confirm(`이 레이어가 큽니다(약 ${(size / 1048576).toFixed(1)}MB).\n개발단계에서는 무거운 DXF/SHP는 앱이 느려질 수 있어 지양 권장입니다.\n그래도 추가할까요?`)) return;
   await putOverlay(rec);
   await loadOverlays();
-  alert(`참조 레이어 추가됨: ${rec.name}\n(좌측 "참조 레이어" 패널에서 끄고켜기·삭제할 수 있습니다)`);
+  alert(`참조 레이어 추가됨: ${rec.name}\n(🗺️ 레이어 버튼에서 끄고켜기·삭제 / 📋 목록에서 사업 이동·복사)`);
 }
 async function uploadDxf(file) {
   if (!file) return;
@@ -1200,6 +1337,46 @@ async function removeOverlay(id) {
   await deleteOverlayRec(id);
   await loadOverlays();
 }
+// ===== 목록(📋) 내 참조 레이어(DXF/SHP) 표시 + 사업 이동(복사)/삭제 =====
+async function renderListLayers() {
+  const el = document.getElementById('listLayerSection');
+  if (!el) return;
+  const ovs = (await getAllOverlays()).filter(o => o.projectId === currentProjectId);
+  if (!ovs.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="ll-head">📂 참조 레이어 (DXF/SHP) ${ovs.length}개 — 사업 이동·복사·삭제</div>` +
+    ovs.map(o => `
+      <div class="ll-row">
+        <span class="ll-name">${o.kind === 'dxf' ? '📐' : '🗺️'} ${esc(o.name)}</span>
+        <button class="mini-btn" onclick="moveOverlay('${o.id}')">사업 이동</button>
+        <button class="mini-btn danger" onclick="removeOverlayFromList('${o.id}')">삭제</button>
+      </div>`).join('');
+}
+async function moveOverlay(id) {
+  const projects = (await getAllProjects()).filter(p => p.id !== currentProjectId);
+  if (!projects.length) { alert('이동할 다른 사업이 없습니다. 먼저 ＋사업으로 사업을 만드세요.'); return; }
+  const listTxt = projects.map((p, i) => `${i + 1} = ${p.name}`).join('\n');
+  const sel = prompt(`참조 레이어를 옮길/복사할 대상 사업 번호를 입력하세요:\n\n${listTxt}`, '1');
+  if (sel === null) return;
+  const target = projects[parseInt(sel.trim(), 10) - 1];
+  if (!target) { alert('번호가 올바르지 않습니다.'); return; }
+  const o = (await getAllOverlays()).find(x => x.id === id);
+  if (!o) return;
+  const copy = confirm(
+    `대상 사업: ${target.name}\n\n[확인] 복사 — 현재 사업에도 그대로 남깁니다.\n[취소] 이동 — 현재 사업에서 빼서 옮깁니다.`);
+  if (copy) {
+    await putOverlay({ ...o, id: 'ov' + Date.now(), projectId: target.id, created: Date.now() });
+  } else {
+    o.projectId = target.id;
+    await putOverlay(o);
+  }
+  await loadOverlays();
+  await renderListLayers();
+  alert(`참조 레이어 "${o.name}" ${copy ? '복사' : '이동'} 완료 → ${target.name}`);
+}
+async function removeOverlayFromList(id) {
+  await removeOverlay(id);
+  await renderListLayers();
+}
 async function renameFeature(id) {
   const f = (await getAllFeatures()).find(x => x.id === id);
   if (!f) return;
@@ -1210,7 +1387,7 @@ async function renameFeature(id) {
   await loadMarkers();   // 마커 팝업의 선형명도 갱신되도록
 }
 async function removeFeature(id) {
-  if (!confirm('이 하천선을 삭제할까요? (귀속된 조사는 삭제되지 않고 귀속만 해제됩니다)')) return;
+  if (!confirm('이 도형(선·구역)을 삭제할까요? (귀속된 조사는 삭제되지 않고 귀속만 해제됩니다)')) return;
   await deleteFeature(id);
   // 이 하천선을 가리키던 기록의 귀속 해제(수동 지정 포함) 후 자동 기록 재계산
   const refs = (await getAll()).filter(r => r.featureId === id);
@@ -1369,21 +1546,27 @@ function cancelDraw() {
   map.getContainer().style.cursor = '';
 }
 async function finishDrawRiver() {
-  if (drawPoints.length < 2) { alert('선형은 최소 2점 이상 찍어야 합니다.'); return; }
-  // 유형 선택(하천/도로/기타) — 도로작업이면 도로선이 될 수 있음
-  const t = prompt('선형 유형: 1=하천, 2=도로, 3=기타', '1');
-  if (t === null) return;   // 취소: 그리던 점 유지
-  const cat = t.trim() === '2' ? '도로' : t.trim() === '3' ? '기타' : '하천';
-  const name = prompt(`${featTypeName(cat)} 이름을 입력하세요 (예: ${cat === '도로' ? '○○로, 국도 ○호' : cat === '기타' ? '○○구간' : '○○천'})`);
+  if (drawPoints.length < 2) { alert('도형은 최소 2점 이상 찍어야 합니다.'); return; }
+  // 도형 종류: 선(거리 기반 귀속) vs 구역(포함 기반 귀속) — 둘 다 "분류 장치"(명세 §10.8)
+  const shapeT = prompt('도형 종류: 1=선(하천·도로 등), 2=구역(폴리곤)', '1');
+  if (shapeT === null) return;   // 취소: 그리던 점 유지
+  const isPoly = shapeT.trim() === '2';
+  if (isPoly && drawPoints.length < 3) { alert('구역(폴리곤)은 최소 3점이 필요합니다. 점을 더 찍어 주세요.'); return; }
+  // 유형(하천/도로/기타) — 색·아이콘 분기에 사용
+  const t = prompt('유형: 1=하천, 2=도로, 3=기타', isPoly ? '3' : '1');
+  if (t === null) return;
+  const cat = t.trim() === '1' ? '하천' : t.trim() === '2' ? '도로' : '기타';
+  const kindLabel = isPoly ? '구역' : featTypeName(cat);
+  const name = prompt(`${kindLabel} 이름을 입력하세요 (예: ${isPoly ? '○○저수지, ○○공사구간' : cat === '도로' ? '○○로, 국도 ○호' : cat === '기타' ? '○○구간' : '○○천'})`);
   if (name === null) return;   // 취소: 그리던 점 유지
   await putFeature({
-    id: 'f' + Date.now(), projectId: currentProjectId, type: 'line', category: cat,
-    name: (name.trim() || ('무명 ' + featTypeName(cat))), coords: drawPoints.slice(),
+    id: 'f' + Date.now(), projectId: currentProjectId, type: isPoly ? 'polygon' : 'line', category: cat,
+    name: (name.trim() || ('무명 ' + kindLabel)), coords: drawPoints.slice(),
     color: featColor(cat), created: Date.now()
   });
   cancelDraw();
-  await recomputeAuto();    // 새 선형 반영 → 자동 귀속 기록 재계산
-  await loadMarkers();      // 마커 팝업의 선형명·라인 팝업 건수 갱신(loadFeatures 포함)
+  await recomputeAuto();    // 새 도형 반영 → 자동 귀속 기록 재계산
+  await loadMarkers();      // 마커 팝업의 도형명·도형 팝업 건수 갱신(loadFeatures 포함)
 }
 
 // 안내 배너 클릭 시 위치지정 취소하고 폼 복귀
@@ -1498,16 +1681,16 @@ async function populateFeatureSelect(selectedVal) {
   const field = document.getElementById('featureField');
   const sel = document.getElementById('featureInput');
   const feats = (await getAllFeatures())
-    .filter(f => f.projectId === currentProjectId && f.type === 'line');
-  if (!feats.length) {                       // 선형이 없으면 귀속 UI 자체를 숨김
+    .filter(f => f.projectId === currentProjectId && (f.type === 'line' || f.type === 'polygon'));
+  if (!feats.length) {                       // 도형이 없으면 귀속 UI 자체를 숨김
     field.style.display = 'none';
     document.getElementById('featureMeta').textContent = '';
     return;
   }
   field.style.display = 'block';
   sel.innerHTML =
-    `<option value="auto">자동 (가장 가까운 선형)</option>` +
-    feats.map(f => `<option value="${f.id}">${featIcon(f.category || '하천')} ${f.name}</option>`).join('') +
+    `<option value="auto">자동 (포함 구역 또는 가장 가까운 선)</option>` +
+    feats.map(f => `<option value="${f.id}">${featIcon(f.category || '하천')} ${esc(f.name)}${f.type === 'polygon' ? ' (구역)' : ''}</option>`).join('') +
     `<option value="">없음 (귀속 안 함)</option>`;
   sel.value = (selectedVal === undefined ? 'auto' : selectedVal);
   if (sel.selectedIndex < 0) sel.value = 'auto';   // 삭제된 featureId 대비
@@ -1523,12 +1706,17 @@ async function refreshAutoAttribution() {
     meta.style.color = '#888';
     return;
   }
-  if (!currentPos) { meta.textContent = '위치를 지정하면 가장 가까운 하천선에 자동 귀속됩니다.'; meta.style.color = '#888'; return; }
-  const near = await nearestLineFeature(currentPos.lat, currentPos.lng, currentProjectId);
-  if (!near.feature) { meta.textContent = '가까운 하천선이 없습니다.'; meta.style.color = '#888'; return; }
+  if (!currentPos) { meta.textContent = '위치를 지정하면 가장 가까운 도형(선·구역)에 자동 귀속됩니다.'; meta.style.color = '#888'; return; }
+  const near = await nearestFeature(currentPos.lat, currentPos.lng, currentProjectId);
+  if (!near.feature) { meta.textContent = '가까운 도형(선·구역)이 없습니다.'; meta.style.color = '#888'; return; }
+  if (near.mode === 'polygon') {
+    meta.innerHTML = `→ 구역 <b>${esc(near.feature.name)}</b>에 포함 (구역 귀속)`;
+    meta.style.color = '#1565c0';
+    return;
+  }
   const amb = isAmbiguous(near.dist, near.secondDist);
-  meta.innerHTML = `→ <b>${near.feature.name}</b>에 귀속 (약 ${Math.round(near.dist)}m)` +
-    (amb ? ` <span style="color:#e65100;">⚠ 갈래(${near.second?.name}) 인접 — 확인 권장</span>` : '');
+  meta.innerHTML = `→ <b>${esc(near.feature.name)}</b>에 귀속 (약 ${Math.round(near.dist)}m)` +
+    (amb ? ` <span style="color:#e65100;">⚠ 갈래(${esc(near.second?.name || '')}) 인접 — 확인 권장</span>` : '');
   meta.style.color = amb ? '#e65100' : '#1565c0';
 }
 // 폼 입력값을 기록에 반영(featureId·featureManual·featureAmbiguous)
@@ -1537,10 +1725,10 @@ async function applyAttribution(rec) {
   const sel = document.getElementById('featureInput');
   const val = (field.style.display !== 'none' && sel) ? sel.value : 'auto';
   if (val === 'auto') {
-    const near = await nearestLineFeature(rec.lat, rec.lng, currentProjectId);
+    const near = await nearestFeature(rec.lat, rec.lng, currentProjectId);
     rec.featureId = near.feature ? near.feature.id : null;
     rec.featureManual = false;
-    rec.featureAmbiguous = near.feature ? isAmbiguous(near.dist, near.secondDist) : false;
+    rec.featureAmbiguous = (near.feature && near.mode === 'line') ? isAmbiguous(near.dist, near.secondDist) : false;
   } else {
     rec.featureId = val || null;     // '' → 없음
     rec.featureManual = true;
@@ -1628,8 +1816,8 @@ document.getElementById('bulkInput').addEventListener('change', async e => {
     let fid = null, famb = false;
     if (!locNote) {
       try {
-        const near = await nearestLineFeature(La, Ln, currentProjectId);
-        if (near.feature) { fid = near.feature.id; famb = isAmbiguous(near.dist, near.secondDist); }
+        const near = await nearestFeature(La, Ln, currentProjectId);
+        if (near.feature) { fid = near.feature.id; famb = (near.mode === 'line') ? isAmbiguous(near.dist, near.secondDist) : false; }
       } catch (_) {}
     }
     try {
@@ -1729,6 +1917,7 @@ async function openList() {
     bar.style.display = 'none';
   }
   listCache = recs.sort((a, b) => b.time - a.time);
+  await renderListLayers();
   renderList();
   document.getElementById('listOverlay').classList.add('show');
 }
