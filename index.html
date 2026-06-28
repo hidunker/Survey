@@ -112,20 +112,21 @@
   }
   .fab:active { background: #0d47a1; }
 
-  /* 우측 기능 버튼 스택(아이콘+명칭). 아래→위로 쌓이고, 맨 아래가 현위치 */
+  /* 우측 기능 버튼 스택(아이콘 + 아래 명칭). 아래→위로 쌓이고, 맨 아래가 현위치 */
   .fab-stack {
-    position: fixed; right: 12px; bottom: 90px; z-index: 1000;
-    display: flex; flex-direction: column; gap: 9px; align-items: flex-end;
+    position: fixed; right: 12px; bottom: 84px; z-index: 1000;
+    display: flex; flex-direction: column; gap: 15px; align-items: flex-end;
   }
-  .fab-item { display: flex; align-items: center; gap: 7px; cursor: pointer; }
-  .fab-item .fi-label {
-    background: rgba(255,255,255,0.93); color: #1a1a1a; font-size: 12px; font-weight: 700;
-    padding: 4px 9px; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.22); white-space: nowrap;
-  }
+  .fab-item { display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer; width: 56px; }
   .fab-item .fi-icon {
     width: 46px; height: 46px; border-radius: 50%; background: #fff; flex-shrink: 0;
     box-shadow: 0 2px 8px rgba(0,0,0,0.25); font-size: 20px;
     display: flex; align-items: center; justify-content: center;
+  }
+  .fab-item .fi-label {
+    font-size: 11px; font-weight: 700; color: #1a1a1a; text-align: center; line-height: 1.1;
+    background: rgba(255,255,255,0.9); padding: 2px 5px; border-radius: 7px;
+    max-width: 64px; word-break: keep-all;
   }
   .fab-item:active .fi-icon { background: #eef0f3; }
   /* 레이어 시트 행(배경지도 라디오 / 오버레이·참조레이어 체크박스) */
@@ -371,12 +372,12 @@
 
 <!-- 우측 기능 버튼 스택 — 아이콘 옆에 명칭(스마트폰엔 마우스오버가 없어 라벨로 안내) -->
 <div class="fab-stack">
-  <div class="fab-item" onclick="openLayer()"><span class="fi-label">배경·레이어</span><span class="fi-icon">🗺️</span></div>
-  <div class="fab-item" onclick="startDrawRiver()"><span class="fi-label">선·구역</span><span class="fi-icon">🏞️</span></div>
-  <div class="fab-item" onclick="openBulk()"><span class="fi-label">사진일괄</span><span class="fi-icon">🗂️</span></div>
-  <div class="fab-item" onclick="openExport()"><span class="fi-label">내보내기</span><span class="fi-icon">📤</span></div>
-  <div class="fab-item" onclick="openList()"><span class="fi-label">목록</span><span class="fi-icon">📋</span></div>
-  <div class="fab-item" onclick="locateMe()"><span class="fi-label">현위치</span><span class="fi-icon">📍</span></div>
+  <div class="fab-item" onclick="openLayer()"><span class="fi-icon">🗺️</span><span class="fi-label">배경·레이어</span></div>
+  <div class="fab-item" onclick="startDrawRiver()"><span class="fi-icon">🏞️</span><span class="fi-label">선·구역</span></div>
+  <div class="fab-item" onclick="openBulk()"><span class="fi-icon">🗂️</span><span class="fi-label">사진일괄</span></div>
+  <div class="fab-item" onclick="openExport()"><span class="fi-icon">📤</span><span class="fi-label">내보내기·불러오기</span></div>
+  <div class="fab-item" onclick="openList()"><span class="fi-icon">📋</span><span class="fi-label">목록</span></div>
+  <div class="fab-item" onclick="locateMe()"><span class="fi-icon">📍</span><span class="fi-label">현위치</span></div>
 </div>
 <button class="fab" onclick="openForm()">+ 조사 등록</button>
 
@@ -637,7 +638,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ========== 공통 상수 ==========
-const BUILD = '2026-06-28b (FAB 라벨·레이어 상단이동 + 일반도 hatch 진하게 + 배너 줄바꿈 + 홈화면앱/뒤로가기 가드)';
+const BUILD = '2026-06-28c (FAB 명칭 아이콘 아래 배치·간격↑ + 일반도 hatch 진하게 + 배너 줄바꿈 + 홈화면앱/뒤로가기 가드)';
 console.log('현장조사 build:', BUILD);
 const KINDS = ['하천', '소하천', '댐지점', '구조물', '불법시설물', '기타'];
 function kindOptions(sel) {
