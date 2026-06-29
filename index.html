@@ -562,6 +562,23 @@
   </div>
 </div>
 
+<!-- 최초 실행 — 첫 사업 만들기 게이트 (닫기 없음: 사업을 만들어야 시작) -->
+<div class="overlay" id="firstProjOverlay">
+  <div class="sheet">
+    <h2>첫 사업 만들기</h2>
+    <div class="meta" style="margin-bottom:14px;line-height:1.5;">시작하려면 사업을 하나 만들어 주세요.<br>모든 조사·사진은 이 사업 아래로 정리됩니다. (예: ○○천 제방조사 / 구례2지점 양수발전)</div>
+    <div class="field">
+      <label>사업명</label>
+      <input id="firstProjName" type="text" placeholder="사업명을 입력하세요"
+        style="width:100%;padding:13px;border:1px solid #ccc;border-radius:10px;font-size:15px;font-family:inherit;"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();createFirstProject();}">
+    </div>
+    <div class="row-btns" style="margin-top:14px;">
+      <button class="btn-primary" onclick="createFirstProject()">사업 만들기</button>
+    </div>
+  </div>
+</div>
+
 <!-- 사업 선택 내보내기 -->
 <div class="overlay" id="exportSelOverlay">
   <div class="sheet">
@@ -860,13 +877,34 @@ function initDB() {
 }
 
 async function migrateAndInit() {
-  let projects = await getAllProjects();
+  const projects = await getAllProjects();
   if (projects.length === 0) {
-    await putProject({ id: 'default', name: '기본 사업', created: Date.now() });
-    projects = await getAllProjects();
+    // 최초 실행 — 자동 '기본 사업'을 만들지 않고, 사용자가 첫 사업을 만들 때까지 막아둠.
+    // (공유 시 기기마다 같던 'default' id가 사라져 사업 충돌도 원천 방지)
+    document.getElementById('firstProjOverlay').classList.add('show');
+    setTimeout(() => document.getElementById('firstProjName')?.focus(), 120);
+    return;
   }
+  await finishInit(projects);
+}
+// 게이트에서 첫 사업 생성 → 초기화 이어가기
+async function createFirstProject() {
+  const inp = document.getElementById('firstProjName');
+  const name = (inp.value || '').trim();
+  if (!name) { alert('사업명을 입력해 주세요.'); inp.focus(); return; }
+  const id = 'p' + Date.now();
+  await putProject({ id, name, created: Date.now() });
+  document.getElementById('firstProjOverlay').classList.remove('show');
+  inp.value = '';
+  await finishInit(await getAllProjects());
+}
+async function finishInit(projects) {
+  // 레거시(구버전) orphan 기록을 첫 사업으로 이관
   const orphans = (await getAll()).filter(r => !r.projectId);
-  for (const r of orphans) { r.projectId = 'default'; await putRecord(r); }
+  if (orphans.length) {
+    const pid = projects[0].id;
+    for (const r of orphans) { r.projectId = pid; await putRecord(r); }
+  }
   currentProjectId = localStorage.getItem('currentProjectId');
   if (!projects.find(p => p.id === currentProjectId)) currentProjectId = projects[0].id;
   localStorage.setItem('currentProjectId', currentProjectId);
@@ -1633,7 +1671,7 @@ async function ensureExifr() {
     document.head.appendChild(s);
   });
 }
-function resizePhoto(file, maxW = 1280, quality = 0.7) {
+function resizePhoto(file, maxW = 1200, quality = 0.7) {
   return new Promise((res, rej) => {
     const reader = new FileReader();
     reader.onload = ev => {
@@ -2273,6 +2311,7 @@ async function exportCSV() {
 
 // 사업 선택 내보내기 — 사업을 골라서(기본 사업 제외 가능) 통째로
 async function openExportSel() {
+  closeExport();                 // 부모 시트를 닫아 선택 창이 앞에 오도록(드릴다운)
   const projs = await getAllProjects();
   const all = await getAll();
   const body = document.getElementById('exportSelBody');
