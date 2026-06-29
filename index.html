@@ -689,7 +689,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ========== 공통 상수 ==========
-const BUILD = '2026-06-29 (JSON 사업단위 내보내기/복원 + 사업명수정✎ + 첫사업 게이트 + 마지막사업 삭제→게이트복귀 + 리사이즈 1200px)';
+const BUILD = '2026-06-29b (사진 EXIF 보존: 촬영일시 shotTime 추출 + ZIP에 GPS·촬영일시 재주입(piexifjs) + CSV/ZIP 원본파일명)';
 console.log('현장조사 build:', BUILD);
 const KINDS = ['하천', '소하천', '댐지점', '구조물', '불법시설물', '기타'];
 function kindOptions(sel) {
@@ -849,6 +849,8 @@ let myMarker = null;
 let selMarker = null;   // 등록 위치 지정 시 지도에 보여줄 핀
 let currentPos = null;
 let currentPhoto = null;
+let currentPhotoName = null;   // 최초 불러온 사진의 원본 파일명(내보내기 파일명·CSV에 사용)
+let currentShot = null;        // EXIF 촬영일시(ms). 없으면 null → 등록시각으로 폴백
 let photoLocated = false;
 let editId = null;
 let cameFromList = false;   // 목록에서 수정 진입 → 저장 후 목록 복귀
@@ -1516,7 +1518,7 @@ function locateMe() {
 function openForm() {
   editId = null; cameFromList = false;
   document.getElementById('formTitle').textContent = '조사 등록';
-  currentPhoto = null; photoLocated = false;
+  currentPhoto = null; currentPhotoName = null; currentShot = null; photoLocated = false;
   document.getElementById('preview').innerHTML = '';
   document.getElementById('memoInput').value = '';
   document.getElementById('kindInput').value = '하천';
@@ -1709,6 +1711,21 @@ async function readPhotoGps(file) {
     return (g && typeof g.latitude === 'number') ? { lat: g.latitude, lng: g.longitude } : null;
   } catch (_) { return null; }
 }
+// GPS와 촬영일시를 EXIF 한 번 파싱으로 함께 추출 (gps 호출과 별도 파싱하던 것을 통합)
+// 촬영일시 우선순위: DateTimeOriginal(실제 촬영) > CreateDate > ModifyDate. 업로드 시각이 아닌 '찍은 시각'.
+async function readPhotoMeta(file) {
+  try {
+    await ensureExifr();
+    const d = await window.exifr.parse(file).catch(() => null);
+    let gps = null;
+    if (d && typeof d.latitude === 'number' && typeof d.longitude === 'number')
+      gps = { lat: d.latitude, lng: d.longitude };
+    let shot = null;
+    const dt = d && (d.DateTimeOriginal || d.CreateDate || d.ModifyDate);
+    if (dt) { const t = (dt instanceof Date) ? dt.getTime() : Date.parse(dt); if (isFinite(t)) shot = t; }
+    return { gps, shot };
+  } catch (_) { return { gps: null, shot: null }; }
+}
 // 위치없음 원인 진단: GPS 외 다른 EXIF(촬영일/기기)가 있으면 "위치만 제거됨"(안드로이드 사진선택 정책)으로 판별
 async function diagnoseExif(file) {
   try {
@@ -1740,7 +1757,10 @@ function fileToDataURL(file) {
 
 async function handlePhotoFile(file) {
   if (!file) return;
-  const gps = await withTimeout(readPhotoGps(file), 12000).catch(() => null);
+  currentPhotoName = file.name || null;
+  const meta = await withTimeout(readPhotoMeta(file), 12000).catch(() => ({ gps: null, shot: null }));
+  currentShot = meta.shot;          // EXIF 촬영일시(없으면 null → 저장 시 등록시각으로 폴백)
+  const gps = meta.gps;
   if (gps) {
     currentPos = gps; photoLocated = true;
     showSelectedLocation(gps.lat, gps.lng);
@@ -1843,10 +1863,14 @@ async function saveRecord() {
     rec.kind = kind; rec.memo = memo;
     rec.lat = currentPos.lat; rec.lng = currentPos.lng;
     if (currentPhoto) rec.photo = currentPhoto;
+    rec.fileName = currentPhotoName || rec.fileName || null;
+    rec.shotTime = currentShot || rec.shotTime || rec.time;   // 촬영일시(없으면 기존값·등록시각)
   } else {
     rec = {
       id: Date.now().toString(), projectId: currentProjectId, time: Date.now(),
-      lat: currentPos.lat, lng: currentPos.lng, kind, memo, photo: currentPhoto || null
+      lat: currentPos.lat, lng: currentPos.lng, kind, memo, photo: currentPhoto || null,
+      fileName: currentPhotoName || null,
+      shotTime: currentShot || Date.now()        // 현장 즉시등록=현재시각 / 불러오기=EXIF 촬영일시
     };
   }
   await applyAttribution(rec);
@@ -1885,11 +1909,13 @@ document.getElementById('bulkInput').addEventListener('change', async e => {
     await new Promise(r => setTimeout(r, 0));   // 화면 갱신 양보(진행률이 실제로 보이도록)
     const f = files[i];
 
-    // 1) 위치: EXIF GPS 우선, 없으면 지도 중심에 임시 배치(버리지 않음 → 나중에 지도지정으로 수정)
+    // 1) 위치+촬영일시: EXIF 한 번 파싱으로 함께 추출. 위치 없으면 지도 중심 임시 배치(버리지 않음)
     let lat = center.lat, lng = center.lng, locNote = '⚠위치없음(지도중심 임시·수정요망)';
+    let shot = null;
     try {
-      const gps = await withTimeout(readPhotoGps(f), 12000).catch(() => null);
-      if (gps) { lat = gps.lat; lng = gps.lng; locNote = ''; }
+      const m = await withTimeout(readPhotoMeta(f), 12000).catch(() => ({ gps: null, shot: null }));
+      shot = m.shot;
+      if (m.gps) { lat = m.gps.lat; lng = m.gps.lng; locNote = ''; }
       else { noloc++; if (!exifDiag) exifDiag = await diagnoseExif(f).catch(() => ''); }
     } catch (_) { noloc++; }
 
@@ -1919,6 +1945,8 @@ document.getElementById('bulkInput').addEventListener('change', async e => {
         id: Date.now().toString() + '_' + i,
         projectId: currentProjectId,
         time: f.lastModified || Date.now(),
+        shotTime: shot || f.lastModified || Date.now(),   // EXIF 촬영일시 우선
+        fileName: f.name || null,
         lat: La, lng: Ln, kind, memo: locNote, photo,
         featureId: fid, featureManual: false, featureAmbiguous: famb
       }), 15000);
@@ -2133,6 +2161,8 @@ async function editItem(id) {
   closeList();
   editId = id;
   currentPhoto = rec.photo || null;
+  currentPhotoName = rec.fileName || null;   // 사진을 새로 안 바꾸면 기존 파일명·촬영일시 유지
+  currentShot = rec.shotTime || null;
   // 좌표가 깨진(누락) 기록도 수정창이 열리도록 방어 — toFixed 호출 전 유효성 확인
   const la = Number(rec.lat), ln = Number(rec.lng);
   const hasLoc = isFinite(la) && isFinite(ln);
@@ -2305,12 +2335,13 @@ function openExport() { document.getElementById('exportOverlay').classList.add('
 function closeExport() { document.getElementById('exportOverlay').classList.remove('show'); }
 
 async function exportCSV() {
-  const all = (await getAll()).filter(r => r.projectId === currentProjectId).sort((a, b) => a.time - b.time);
+  const all = (await getAll()).filter(r => r.projectId === currentProjectId)
+    .sort((a, b) => (a.shotTime || a.time) - (b.shotTime || b.time));
   if (!all.length) { alert('현재 사업에 등록된 데이터가 없습니다.'); return; }
-  const header = ['id', '시각', '위도', '경도', '종류', '메모', '사진유무'];
+  const header = ['파일명', '촬영일시', '위도', '경도', '종류', '메모', '사진유무'];
   const rows = all.map(r => [
-    r.id,
-    new Date(r.time).toLocaleString('ko-KR'),
+    '"' + (r.fileName || r.id).replace(/"/g, '""') + '"',
+    new Date(r.shotTime || r.time).toLocaleString('ko-KR'),
     r.lat, r.lng, r.kind,
     '"' + (r.memo || '').replace(/"/g, '""') + '"',
     r.photo ? 'Y' : 'N'
@@ -2445,6 +2476,30 @@ async function importJSON(e) {
   closeExport();
 }
 
+// 리사이즈(canvas)로 사라진 EXIF를 piexifjs로 재주입 — GPS(저장된 lat/lng) + 촬영일시(shotTime)
+// 임시배치(위치없음)·비JPEG(HEIC 폴백)는 건너뜀(try/catch로 원본 반환)
+function injectExif(dataURL, r) {
+  try {
+    if (!window.piexif || !/^data:image\/jpe?g/i.test(dataURL)) return dataURL;
+    const zeroth = {}, exif = {}, gps = {};
+    if (r.shotTime) {
+      const s = new Date(r.shotTime), pad = n => String(n).padStart(2, '0');
+      const str = `${s.getFullYear()}:${pad(s.getMonth() + 1)}:${pad(s.getDate())} ${pad(s.getHours())}:${pad(s.getMinutes())}:${pad(s.getSeconds())}`;
+      exif[piexif.ExifIFD.DateTimeOriginal] = str;
+      exif[piexif.ExifIFD.DateTimeDigitized] = str;
+      zeroth[piexif.ImageIFD.DateTime] = str;
+    }
+    const hasLoc = isFinite(r.lat) && isFinite(r.lng) && !(r.memo || '').includes('위치없음');
+    if (hasLoc) {
+      gps[piexif.GPSIFD.GPSLatitudeRef] = r.lat < 0 ? 'S' : 'N';
+      gps[piexif.GPSIFD.GPSLatitude] = piexif.GPSHelper.degToDmsRational(Math.abs(r.lat));
+      gps[piexif.GPSIFD.GPSLongitudeRef] = r.lng < 0 ? 'W' : 'E';
+      gps[piexif.GPSIFD.GPSLongitude] = piexif.GPSHelper.degToDmsRational(Math.abs(r.lng));
+    }
+    if (!r.shotTime && !hasLoc) return dataURL;   // 넣을 게 없으면 그대로
+    return piexif.insert(piexif.dump({ '0th': zeroth, 'Exif': exif, 'GPS': gps }), dataURL);
+  } catch (_) { return dataURL; }
+}
 async function exportPhotosZip() {
   const all = await getAll();
   const withPhoto = all.filter(r => r.projectId === currentProjectId && r.photo);
@@ -2457,12 +2512,32 @@ async function exportPhotosZip() {
       document.head.appendChild(s);
     });
   }
+  // piexifjs 지연 로드 — 리사이즈로 사라진 EXIF(GPS·촬영일시)를 내보낼 때 다시 써넣음
+  if (!window.piexif) {
+    await new Promise((res) => {
+      const s = document.createElement('script');
+      s.src = 'https://unpkg.com/piexifjs';
+      s.onload = res; s.onerror = res;   // 실패해도 EXIF 없이 사진은 내보냄
+      document.head.appendChild(s);
+    });
+  }
   const zip = new JSZip();
+  const used = new Map();   // 같은 원본 파일명 중복 시 (2),(3) 접미사
+  let exifOk = 0;
   withPhoto.forEach((r, i) => {
-    const base64 = r.photo.split(',')[1];
-    const dt = new Date(r.time).toISOString().slice(0, 10);
-    zip.file(`${String(i + 1).padStart(3, '0')}_${dt}_${r.kind}.jpg`, base64, { base64: true });
+    let dataURL = r.photo;
+    if (window.piexif) { const out = injectExif(dataURL, r); if (out !== dataURL) { dataURL = out; exifOk++; } }
+    const base64 = (dataURL.split(',')[1]) || '';
+    // 파일명: 원본 사진 이름 우선, 없으면 날짜_종류
+    const dt = new Date(r.shotTime || r.time).toISOString().slice(0, 10);
+    let base = (r.fileName ? r.fileName.replace(/\.[^.]+$/, '') : '').replace(/[\\/:*?"<>|]/g, '_').trim();
+    if (!base) base = `${String(i + 1).padStart(3, '0')}_${dt}_${r.kind}`;
+    let name = base + '.jpg';
+    if (used.has(name)) { const n = used.get(name) + 1; used.set(name, n); name = `${base}(${n}).jpg`; }
+    else used.set(name, 1);
+    zip.file(name, base64, { base64: true });
   });
+  console.log(`사진 ZIP: ${withPhoto.length}장, EXIF 재주입 ${exifOk}장` + (window.piexif ? '' : ' (piexif 로드 실패 → EXIF 없이 내보냄)'));
   const blob = await zip.generateAsync({ type: 'blob' });
   await shareOrDownload(blob, '현장조사_사진_' + dateTag() + '.zip');
 }
