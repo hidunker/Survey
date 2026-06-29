@@ -689,7 +689,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ========== 공통 상수 ==========
-const BUILD = '2026-06-29b (사진 EXIF 보존: 촬영일시 shotTime 추출 + ZIP에 GPS·촬영일시 재주입(piexifjs) + CSV/ZIP 원본파일명)';
+const BUILD = '2026-06-29c (사진 EXIF 보존 + CSV 군집화 정보: 사업명·귀속도형·귀속유형/방식·갈래확인 컬럼 + 군집별 정렬)';
 console.log('현장조사 build:', BUILD);
 const KINDS = ['하천', '소하천', '댐지점', '구조물', '불법시설물', '기타'];
 function kindOptions(sel) {
@@ -2335,15 +2335,36 @@ function openExport() { document.getElementById('exportOverlay').classList.add('
 function closeExport() { document.getElementById('exportOverlay').classList.remove('show'); }
 
 async function exportCSV() {
-  const all = (await getAll()).filter(r => r.projectId === currentProjectId)
-    .sort((a, b) => (a.shotTime || a.time) - (b.shotTime || b.time));
+  const all = (await getAll()).filter(r => r.projectId === currentProjectId);
   if (!all.length) { alert('현재 사업에 등록된 데이터가 없습니다.'); return; }
-  const header = ['파일명', '촬영일시', '위도', '경도', '종류', '메모', '사진유무'];
+  // 군집(귀속 도형) 조회용 맵 + 사업명
+  const featById = new Map(
+    (await getAllFeatures()).filter(f => f.projectId === currentProjectId).map(f => [f.id, f]));
+  const projName = (await getAllProjects()).find(p => p.id === currentProjectId)?.name || '';
+  const clusterName = r => { const f = r.featureId ? featById.get(r.featureId) : null; return f ? f.name : ''; };
+  const clusterType = r => {
+    const f = r.featureId ? featById.get(r.featureId) : null;
+    return f ? (f.type === 'polygon' ? '구역' : featTypeName(f.category)) : '미귀속';
+  };
+  // 군집별로 묶어 정렬(목록과 동일: 도형명 오름차순·미귀속 맨끝), 군집 내는 촬영일시순
+  all.sort((a, b) => {
+    const na = clusterName(a), nb = clusterName(b);
+    if (na !== nb) { if (!na) return 1; if (!nb) return -1; return na.localeCompare(nb, 'ko'); }
+    return (a.shotTime || a.time) - (b.shotTime || b.time);
+  });
+  const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const header = ['파일명', '사업명', '군집(귀속도형)', '귀속유형', '귀속방식', '촬영일시', '종류', '위도', '경도', '갈래확인', '메모', '사진유무'];
   const rows = all.map(r => [
-    '"' + (r.fileName || r.id).replace(/"/g, '""') + '"',
+    q(r.fileName || r.id),
+    q(projName),
+    q(clusterName(r)),
+    clusterType(r),
+    r.featureId ? (r.featureManual ? '수동' : '자동') : '',
     new Date(r.shotTime || r.time).toLocaleString('ko-KR'),
-    r.lat, r.lng, r.kind,
-    '"' + (r.memo || '').replace(/"/g, '""') + '"',
+    r.kind,
+    r.lat, r.lng,
+    r.featureAmbiguous ? '갈래확인요망' : '',
+    q(r.memo || ''),
     r.photo ? 'Y' : 'N'
   ]);
   const csv = '﻿' + [header, ...rows].map(r => r.join(',')).join('\r\n');
