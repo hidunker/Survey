@@ -77,6 +77,12 @@
     font-size: 13px; line-height: 1; padding: 6px 9px; border-radius: 8px; cursor: pointer; flex-shrink: 0;
   }
   .proj-x:active { background: #fdeaea; }
+  /* 사업명 수정(✎) 버튼 */
+  .proj-edit {
+    border: 1px solid #cdd7e3; background: #fff; color: #1565c0; font-weight: 700;
+    font-size: 13px; line-height: 1; padding: 6px 9px; border-radius: 8px; cursor: pointer; flex-shrink: 0;
+  }
+  .proj-edit:active { background: #e8f1fb; }
 
   /* 지도 컨트롤(줌/레이어)을 상단 바 아래로 내려 가림 방지 */
   .leaflet-top { top: 52px; }
@@ -346,6 +352,7 @@
   <div class="tb-left">
     <h1>현장조사</h1>
     <select id="projectSelect" onchange="onProjectChange()" title="사업 선택"></select>
+    <button class="proj-edit" onclick="renameProject()" title="현재 사업명 수정">✎</button>
     <button class="proj-x" onclick="deleteProject()" title="현재 사업 삭제">✕</button>
   </div>
   <div class="tb-right">
@@ -577,11 +584,19 @@
       </div>
     </div>
 
-    <div class="export-option" onclick="exportJSON()">
+    <div class="export-option" onclick="exportJSONProject()">
+      <div class="icon">📁</div>
+      <div>
+        <div class="label">이 사업만 내보내기 (JSON)</div>
+        <div class="desc">현재 선택된 사업 1개만 자료·사진과 함께 내보내기 (동료에게 사업 단위로 전달)</div>
+      </div>
+    </div>
+
+    <div class="export-option" onclick="exportJSONAll()">
       <div class="icon">💾</div>
       <div>
         <div class="label">전체 백업 (JSON)</div>
-        <div class="desc">모든 데이터를 JSON 파일로 내보내기 (사진 포함)</div>
+        <div class="desc">모든 사업을 사업명까지 통째로 내보내기 (사진 포함 · 기기 이전·전체 백업용)</div>
       </div>
     </div>
 
@@ -589,7 +604,7 @@
       <div class="icon">📥</div>
       <div>
         <div class="label">백업 복원 (JSON)</div>
-        <div class="desc">이전에 백업한 JSON 파일을 불러와 복원 · 카톡에서는 구글드라이브/원드라이브에 올린 파일 선택</div>
+        <div class="desc">백업 JSON을 사업 단위로 불러오기 · 같은 사업명이 있으면 합칠지 물어봄 · 카톡에서는 드라이브/원드라이브 파일 선택</div>
       </div>
     </div>
     <input type="file" id="importInput" accept=".json,application/json" style="display:none" onchange="importJSON(event)">
@@ -999,6 +1014,22 @@ async function newProject() {
   localStorage.setItem('currentProjectId', id);
   renderProjectSelect(await getAllProjects());
   loadMarkers();
+}
+async function renameProject() {
+  const projects = await getAllProjects();
+  const cur = projects.find(p => p.id === currentProjectId);
+  if (!cur) { alert('현재 사업을 찾을 수 없습니다.'); return; }
+  const name = prompt('사업명을 수정하세요', cur.name);
+  if (name === null) return;                       // 취소
+  const trimmed = name.trim();
+  if (!trimmed) { alert('사업명은 비울 수 없습니다.'); return; }
+  if (trimmed === cur.name) return;                // 변경 없음
+  if (projects.some(p => p.id !== cur.id && p.name === trimmed)) {
+    alert(`이미 같은 이름의 사업「${trimmed}」이 있습니다. 다른 이름을 사용하세요.`);
+    return;
+  }
+  await putProject({ ...cur, name: trimmed });
+  renderProjectSelect(await getAllProjects());
 }
 async function deleteProject() {
   const projects = await getAllProjects();
@@ -2221,15 +2252,33 @@ async function exportCSV() {
   await shareOrDownload(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), '현장조사_' + dateTag() + '.csv');
 }
 
-async function exportJSON() {
+// 전체 백업 — 모든 사업을 사업정보(이름)와 함께 통째로
+async function exportJSONAll() {
+  const projs = await getAllProjects();
   const all = await getAll();
   const feats = await getAllFeatures();
   const ovs = await getAllOverlays();
   if (!all.length && !feats.length && !ovs.length) { alert('등록된 데이터가 없습니다.'); return; }
-  // 신형식: records + features(선형) + overlays(DXF/SHP) 함께 내보내 → 폰에서 JSON 하나로 메모·선형·참조도형 모두 복원
-  const payload = { app: 'fieldSurvey', version: 4, exportedAt: Date.now(), records: all, features: feats, overlays: ovs };
+  await writeBackup(projs, all, feats, ovs, '현장조사_전체백업_' + dateTag() + '.json');
+}
+
+// 이 사업만 — 현재 사업 1개와 그에 속한 자료만
+async function exportJSONProject() {
+  const pid = currentProjectId;
+  const projs = (await getAllProjects()).filter(p => p.id === pid);
+  const all = (await getAll()).filter(r => r.projectId === pid);
+  const feats = (await getAllFeatures()).filter(f => f.projectId === pid);
+  const ovs = (await getAllOverlays()).filter(o => o.projectId === pid);
+  if (!all.length && !feats.length && !ovs.length) { alert('현재 사업에 내보낼 데이터가 없습니다.'); return; }
+  const pname = (projs[0]?.name || '사업').replace(/[\\/:*?"<>|]/g, '_');
+  await writeBackup(projs, all, feats, ovs, '현장조사_' + pname + '_' + dateTag() + '.json');
+}
+
+// 신형식(v5): projects(사업) + records + features(선형) + overlays(DXF/SHP) 를 함께 내보내 사업 단위로 복원 가능
+async function writeBackup(projects, records, features, overlays, filename) {
+  const payload = { app: 'fieldSurvey', version: 5, exportedAt: Date.now(), projects, records, features, overlays };
   const json = JSON.stringify(payload);
-  await shareOrDownload(new Blob([json], { type: 'application/json' }), '현장조사_백업_' + dateTag() + '.json');
+  await shareOrDownload(new Blob([json], { type: 'application/json' }), filename);
 }
 
 async function importJSON(e) {
@@ -2239,33 +2288,59 @@ async function importJSON(e) {
   const text = await file.text();
   let data;
   try { data = JSON.parse(text); } catch { alert('JSON 파일을 읽을 수 없습니다.'); return; }
-  // 하위호환: 배열=구형식(records만) / 객체=신형식({records, features, overlays})
-  let records, features, ovs;
-  if (Array.isArray(data)) { records = data; features = []; ovs = []; }
-  else if (data && Array.isArray(data.records)) { records = data.records; features = data.features || []; ovs = data.overlays || []; }
-  else { alert('올바른 백업 파일이 아닙니다.'); return; }
-  const msg = `조사 ${records.length}건` + (features.length ? ` · 선형 ${features.length}개` : '') +
+  // 하위호환: 배열=구형식(records만) / 객체 = 신형식({projects, records, features, overlays})
+  let projs, records, features, ovs;
+  if (Array.isArray(data)) { projs = []; records = data; features = []; ovs = []; }
+  else if (data && Array.isArray(data.records)) {
+    projs = data.projects || []; records = data.records; features = data.features || []; ovs = data.overlays || [];
+  } else { alert('올바른 백업 파일이 아닙니다.'); return; }
+
+  const msg = (projs.length ? `사업 ${projs.length}개 · ` : '') + `조사 ${records.length}건` +
+    (features.length ? ` · 선형 ${features.length}개` : '') +
     (ovs.length ? ` · 참조레이어(DXF/SHP) ${ovs.length}개` : '') +
-    `를 현재 사업으로 복원합니다. 기존 데이터에 추가(덮어쓰기)됩니다. 계속할까요?`;
+    `를 불러옵니다. 기존 데이터에 추가됩니다. 계속할까요?`;
   if (!confirm(msg)) return;
-  const ids = new Set((await getAllProjects()).map(p => p.id));
-  // 선형(features) 먼저 복원 — id는 유지, projectId만 현재 사업으로(귀속 featureId 링크 보존)
-  for (const f of features) {
-    if (!f.projectId || !ids.has(f.projectId)) f.projectId = currentProjectId;
-    await putFeature(f);
+
+  const localProjects = await getAllProjects();
+  const localById = new Map(localProjects.map(p => [p.id, p]));
+  const localByName = new Map(localProjects.map(p => [p.name, p]));
+  const usedIds = new Set(localProjects.map(p => p.id));
+
+  // 사업 id 재배치: 들어온 사업 id → 이 기기에서 쓸 id
+  const projMap = {};
+  if (projs.length) {
+    for (const p of projs) {
+      const dup = localByName.get(p.name);   // 같은 사업명이 이미 있나?
+      if (dup) {
+        // 충돌: 같이(합쳐서) 불러올지 물어봄. 취소하면 전체 중단 → 사업명을 바꾼 뒤 다시 시도 가능.
+        const ok = confirm(`기존에 동일한 사업명「${p.name}」이 있습니다.\n같이 불러오시겠습니까?\n\n` +
+          `[확인] 기존「${p.name}」사업에 합쳐서 불러옵니다.\n` +
+          `[취소] 불러오기를 중단합니다. (✎ 버튼으로 기존 사업명을 바꾼 뒤 다시 불러오면 별도 사업으로 들어옵니다.)`);
+        if (!ok) { alert('불러오기를 취소했습니다.'); return; }
+        projMap[p.id] = dup.id;
+      } else {
+        // 새 사업으로 생성. 들어온 id가 비어있거나 이미 쓰는 id면 새 id 발급.
+        let nid = p.id;
+        if (!nid || usedIds.has(nid)) nid = 'p' + Date.now() + Math.random().toString(36).slice(2, 6);
+        await putProject({ id: nid, name: p.name, created: p.created || Date.now() });
+        usedIds.add(nid); localByName.set(p.name, { id: nid, name: p.name });
+        projMap[p.id] = nid;
+      }
+    }
   }
-  for (const r of records) {
-    if (!r.projectId || !ids.has(r.projectId)) r.projectId = currentProjectId;
-    await putRecord(r);
-  }
-  // 참조 레이어(DXF/SHP) 복원 → 폰에서도 메모·선형과 함께 도형이 바로 보임
-  for (const o of ovs) {
-    if (!o.projectId || !ids.has(o.projectId)) o.projectId = currentProjectId;
-    await putOverlay(o);
-  }
+  // 사업 정보가 없는 구형식·미매핑 자료는 현재 사업으로 귀속
+  const mapPid = (pid) => projMap[pid] || (localById.has(pid) ? pid : currentProjectId);
+
+  // 선형(features) 먼저 복원 — id 유지(귀속 featureId 링크 보존), projectId만 재배치
+  for (const f of features) { f.projectId = mapPid(f.projectId); await putFeature(f); }
+  for (const r of records)  { r.projectId = mapPid(r.projectId); await putRecord(r); }
+  for (const o of ovs)      { o.projectId = mapPid(o.projectId); await putOverlay(o); }
+
+  renderProjectSelect(await getAllProjects());
   await loadMarkers();
   await loadOverlays();
-  alert(`복원 완료 — 조사 ${records.length}건` + (features.length ? `, 선형 ${features.length}개` : '') +
+  alert(`복원 완료 — ` + (projs.length ? `사업 ${projs.length}개, ` : '') + `조사 ${records.length}건` +
+    (features.length ? `, 선형 ${features.length}개` : '') +
     (ovs.length ? `, 참조레이어 ${ovs.length}개` : '') + '.');
   closeExport();
 }
