@@ -1160,12 +1160,15 @@ async function loadMarkers() {
     const img = r.photo
       ? `<img src="${r.photo}" style="width:160px;border-radius:6px;display:block;margin-top:6px;cursor:pointer;" onclick="openPhotoView('${r.id}')" title="클릭하면 크게 보기">`
       : '';
+    const fnameLine = r.fileName
+      ? `<br><small style="color:#555;word-break:break-all;">📎 ${esc(r.fileName)}</small>`
+      : '';
     const actions =
       `<div style="margin-top:8px;display:flex;gap:6px;">` +
       `<span style="flex:1;text-align:center;color:#1565c0;cursor:pointer;font-weight:700;border:1px solid #cfe0f5;border-radius:6px;padding:6px 0;" onclick="editFromMap('${r.id}')">✏️ 수정</span>` +
       `<span style="flex:1;text-align:center;color:#d32f2f;cursor:pointer;font-weight:700;border:1px solid #f3d2d2;border-radius:6px;padding:6px 0;" onclick="removeFromMap('${r.id}')">🗑 삭제</span>` +
       `</div>`;
-    m.bindPopup(`<b>${r.kind}</b>${riverLine}<br>${r.memo || '(메모 없음)'}<br><small>${when}</small>${img}${actions}`);
+    m.bindPopup(`<b>${r.kind}</b>${riverLine}<br>${r.memo || '(메모 없음)'}<br><small>${when}</small>${fnameLine}${img}${actions}`);
     recordMarkers.push(m);
   });
   document.getElementById('count').textContent =
@@ -2090,6 +2093,7 @@ function listItemHTML(r) {
       <div class="t">${esc(r.kind)}${riverTag}${r.featureAmbiguous ? ' <span style="color:#e65100;">⚠</span>' : ''}</div>
       ${memoBlock}
       <div class="s">${when}</div>
+      ${r.fileName ? `<div class="s" style="color:#777;word-break:break-all;" title="원본 파일명">📎 ${esc(r.fileName)}</div>` : ''}
     </div>
     ${actions}
   </div>`;
