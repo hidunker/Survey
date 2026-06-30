@@ -1991,12 +1991,15 @@ async function openPhotoView(id) {
   if (!rec || !rec.photo) return;
   photoViewId = id;
   document.getElementById('ppImg').src = rec.photo;
-  const featName = (rec.featureId && featNameById[rec.featureId])
-    ? `${featIcon(featCatById[rec.featureId] || '하천')} ${featNameById[rec.featureId]}` : '';
-  const ppParts = [rec.kind];
-  if (featName) ppParts.push(featName);
-  if (rec.memo) ppParts.push(rec.memo);
-  if (rec.fileName) ppParts.push(`📎 ${rec.fileName}`);
+  let featName = '';
+  try {
+    if (rec.featureId && featNameById[rec.featureId])
+      featName = `${featIcon(featCatById[rec.featureId] || '하천')} ${featNameById[rec.featureId]}`;
+  } catch (e) { featName = ''; }
+  const ppParts = [rec.kind];                          // ① 구분(하천)
+  if (rec.fileName) ppParts.push(`📎 ${rec.fileName}`); // ② 원파일명
+  if (featName) ppParts.push(featName);                // ③ 도형 귀속(구역/선형명)
+  if (rec.memo) ppParts.push(rec.memo);                // ④ 메모
   document.getElementById('ppTitle').textContent = ppParts.join(' · ');
   document.getElementById('photoPanel').style.display = 'flex';
 }
