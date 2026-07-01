@@ -61,8 +61,14 @@
   .topbar .tb-left { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
   .topbar .tb-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
   #projectSelect {
-    max-width: 42vw; padding: 6px 8px; border: 1px solid #ccc; border-radius: 8px;
+    flex: 0 1 auto; min-width: 0; max-width: 30vw;   /* 길어도 …축약 + 옆 ✎/✕ 밀림 방지 */
+    padding: 6px 8px; border: 1px solid #ccc; border-radius: 8px;
     font-size: 13px; font-family: inherit; background: #fff; color: #1a1a1a;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  @media (max-width: 430px) {
+    .topbar h1 { font-size: 14px; flex-shrink: 0; }   /* 좁은 폰: 제목은 유지하되 축소 */
+    #projectSelect { max-width: 34vw; }
   }
   .newproj-btn {
     border: 1px solid #1565c0; background: #fff; color: #1565c0; font-weight: 700;
@@ -89,6 +95,35 @@
   .leaflet-control-layers { font-size: 13px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
   .leaflet-control-layers-expanded { padding: 8px 12px 8px 8px; }
   .north-arrow { filter: drop-shadow(0 1px 3px rgba(0,0,0,0.35)); cursor: default; }
+  /* 주소 검색 — 방위표 아래, 평소엔 아이콘만(접힘) */
+  .addr-search { margin-top: 6px; }
+  .addr-search-btn {
+    width: 36px; height: 36px; background: #fff; border-radius: 8px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center;
+    font-size: 17px; cursor: pointer; user-select: none;
+  }
+  .addr-search-btn.active { background: #1565c0; }
+  .addr-search-box {
+    display: none; margin-top: 6px; background: #fff; border-radius: 8px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3); padding: 7px; width: 190px; max-width: 58vw;
+  }
+  .addr-search-box.open { display: block; }
+  .addr-search-box input {
+    width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid #ccc;
+    border-radius: 6px; font-size: 13px; font-family: inherit;
+  }
+  .addr-search-box .as-row { display: flex; gap: 4px; margin-top: 4px; }
+  .addr-search-box .as-go {
+    flex-shrink: 0; background: #1565c0; color: #fff; border: none; border-radius: 6px;
+    font-size: 12px; padding: 0 10px; cursor: pointer;
+  }
+  .addr-result-list { margin-top: 6px; max-height: 150px; overflow-y: auto; }
+  .addr-result-item { padding: 6px 4px; font-size: 12px; border-bottom: 1px solid #eee; cursor: pointer; }
+  .addr-result-item:last-child { border-bottom: none; }
+  .addr-result-item:active { background: #f0f4fa; }
+  .addr-result-district { font-weight: 600; background: #f5f8ff; }
+  .addr-empty { font-size: 12px; color: #999; padding: 4px 2px; }
+  .addr-src-note { font-size: 10px; color: #999; }
   /* 좌측 참조 레이어 패널 */
   #overlayPanel {
     display: none; position: fixed; left: 8px; top: 110px; z-index: 1100;
@@ -108,6 +143,17 @@
   #overlayPanel .ov-del:active { background: #fdeaea; border-radius: 6px; }
   .leaflet-control-scale { margin-bottom: 8px !important; }
   .leaflet-control-scale-line { font-size: 11px; padding: 2px 6px; }
+
+  /* DXF 텍스트(측점) 라벨 — 점 위치에 중앙정렬, 배경 적응 색 */
+  .dxf-label { width: 0; height: 0; background: transparent; border: none; }
+  .dxf-label span {
+    position: absolute; transform: translate(-50%, -50%); white-space: nowrap;
+    font-size: 12px; font-weight: 700; line-height: 1;
+    color: #111; text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff, 0 0 2px #fff;
+  }
+  .dxf-label.sat span {   /* 위성 배경: 흰 글씨 + 검은 테두리 */
+    color: #fff; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 0 2px #000;
+  }
 
   /* 하단 버튼 */
   .fab {
@@ -144,6 +190,7 @@
   .lay-row input { width: 20px; height: 20px; flex-shrink: 0; margin: 0; }
   .lay-row .lay-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .lay-row .lay-del { color: #d32f2f; font-size: 16px; flex-shrink: 0; padding: 2px 6px; cursor: pointer; }
+  .lay-row .lay-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; border: 1px solid rgba(0,0,0,0.25); }
   .lay-empty { color: #999; font-size: 13px; padding: 8px 4px; }
   /* 하천선 그리기 컨트롤 바 */
   #drawBar {
@@ -157,6 +204,20 @@
   #drawBar .d-ok { background: #1565c0; color: #fff; }
   #drawBar .d-undo { background: #eef0f3; color: #444; }
   #drawBar .d-cancel { background: #fdeaea; color: #d32f2f; }
+  /* 지도 드래그 다중선택(§12.2[9]) */
+  #mapSelBar {
+    position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%); z-index: 1900;
+    display: none; gap: 8px; align-items: center;
+    background: rgba(255,255,255,0.97); padding: 8px 12px; border-radius: 12px;
+    box-shadow: 0 3px 12px rgba(0,0,0,0.25); max-width: 92vw; text-align: center;
+  }
+  #mapSelBar span { font-size: 13px; font-weight: 700; color: #1565c0; }
+  #mapSelBar button { border: none; border-radius: 8px; padding: 9px 13px; font-size: 13px; font-weight: 700; cursor: pointer; background: #fdeaea; color: #d32f2f; }
+  .map-sel-rect {
+    position: absolute; z-index: 1000; pointer-events: none;
+    border: 2px dashed #1565c0; background: rgba(21,101,192,0.12);
+  }
+  .fab-item.active .fi-icon { background: #1565c0; color: #fff; }
 
   /* 내보내기 시트 */
   .export-option {
@@ -325,9 +386,42 @@
     border: none; border-radius: 8px; padding: 8px 14px; font-size: 14px; font-weight: 700; cursor: pointer;
   }
   #photoPanel .pp-edit { background: #1565c0; color: #fff; }
+  #photoPanel .pp-rename { background: #2e7d32; color: #fff; }
+  #photoPanel .pp-bar button { white-space: nowrap; flex-shrink: 0; }
   #photoPanel .pp-close { background: #3a3a3a; color: #fff; }
-  #photoPanel .pp-body { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  #photoPanel .pp-body { position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
   #photoPanel .pp-body img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  /* 겹친 지점 여러 장 넘겨보기(◀▶) — 그룹 컨텍스트에서만 표시 */
+  #photoPanel .pp-nav {
+    display: none; position: absolute; top: 50%; transform: translateY(-50%);
+    width: 42px; height: 42px; border-radius: 50%; border: none; z-index: 2;
+    background: rgba(0,0,0,0.45); color: #fff; font-size: 26px; line-height: 1; cursor: pointer;
+  }
+  #photoPanel .pp-nav.show { display: block; }
+  #photoPanel .pp-prev { left: 8px; }
+  #photoPanel .pp-next { right: 8px; }
+  #photoPanel .pp-dots { display: none; justify-content: center; gap: 6px; padding: 8px 0; background: #111; flex-shrink: 0; }
+  #photoPanel .pp-dots.show { display: flex; }
+  #photoPanel .pp-dots span { width: 7px; height: 7px; border-radius: 50%; background: #555; }
+  #photoPanel .pp-dots span.on { background: #ff5722; }
+  /* 포인트 위치 이동 모드 배너 */
+  #moveBar {
+    display: none; position: fixed; top: 58px; left: 50%; transform: translateX(-50%);
+    z-index: 1400; background: rgba(30,30,30,0.94); color: #fff; border-radius: 10px;
+    padding: 8px 10px; gap: 8px; align-items: center; box-shadow: 0 3px 12px rgba(0,0,0,0.4);
+    max-width: 94vw; font-size: 13px;
+  }
+  #moveBar #moveMsg { min-width: 0; }
+  #moveBar button { border: 0; border-radius: 7px; padding: 7px 12px; font-weight: 700; font-size: 13px; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+  #moveBar .mb-save { background: #ff5722; color: #fff; }
+  #moveBar .mb-cancel { background: #555; color: #fff; }
+  /* DXF 좌표계 선택 버튼 */
+  #dxfCrsOverlay .dxf-el, #dxfCrsOverlay .dxf-or {
+    flex: 1; min-width: 72px; padding: 10px 8px; border: 2px solid #dce0e6; border-radius: 10px;
+    background: #fff; font-size: 13px; font-weight: 700; cursor: pointer; text-align: center; line-height: 1.3;
+  }
+  #dxfCrsOverlay .dxf-el small, #dxfCrsOverlay .dxf-or small { font-weight: 400; color: #888; font-size: 11px; }
+  #dxfCrsOverlay .dxf-el.on, #dxfCrsOverlay .dxf-or.on { border-color: #1565c0; background: #e8f1fc; color: #0d47a1; }
 </style>
 </head>
 <body>
@@ -377,6 +471,12 @@
   <button class="d-ok" onclick="finishDrawRiver()">완료</button>
 </div>
 
+<!-- 지도 드래그 다중선택 안내 바(§12.2[9]) -->
+<div id="mapSelBar">
+  <span>지도를 드래그해 여러 지점을 한 번에 선택하세요</span>
+  <button onclick="toggleMapSelectMode()">선택모드 끄기</button>
+</div>
+
 <!-- 우측 기능 버튼 스택 — 아이콘 옆에 명칭(스마트폰엔 마우스오버가 없어 라벨로 안내) -->
 <div class="fab-stack">
   <div class="fab-item" onclick="openLayer()"><span class="fi-icon">🗺️</span><span class="fi-label">배경·레이어</span></div>
@@ -384,6 +484,7 @@
   <div class="fab-item" onclick="openBulk()"><span class="fi-icon">🗂️</span><span class="fi-label">사진일괄</span></div>
   <div class="fab-item" onclick="openExport()"><span class="fi-icon">📤</span><span class="fi-label">내보내기·불러오기</span></div>
   <div class="fab-item" onclick="openList()"><span class="fi-icon">📋</span><span class="fi-label">목록</span></div>
+  <div class="fab-item" id="mapSelFab" onclick="toggleMapSelectMode()"><span class="fi-icon">▭</span><span class="fi-label">영역선택</span></div>
   <div class="fab-item" onclick="locateMe()"><span class="fi-icon">📍</span><span class="fi-label">현위치</span></div>
 </div>
 <button class="fab" onclick="openForm()">+ 조사 등록</button>
@@ -392,10 +493,49 @@
 <div id="photoPanel">
   <div class="pp-bar">
     <span class="pp-title" id="ppTitle"></span>
-    <button class="pp-edit" onclick="editFromPhoto()">✏️ 수정</button>
+    <button class="pp-rename" onclick="renamePhotoFile()">📝 파일명</button>
+    <button class="pp-edit" onclick="editFromPhoto()">정보수정</button>
     <button class="pp-close" onclick="closePhotoView()">닫기 ✕</button>
   </div>
-  <div class="pp-body"><img id="ppImg" src="" alt=""></div>
+  <div class="pp-body">
+    <button class="pp-nav pp-prev" id="ppPrev" onclick="stepPhotoView(-1)" title="이전 사진">‹</button>
+    <img id="ppImg" src="" alt="">
+    <button class="pp-nav pp-next" id="ppNext" onclick="stepPhotoView(1)" title="다음 사진">›</button>
+  </div>
+  <div class="pp-dots" id="ppDots"></div>
+</div>
+
+<!-- DXF 좌표계(EPSG) 선택 — 타원체 × 원점 버튼 선택(숫자 입력 대신) -->
+<div class="overlay" id="dxfCrsOverlay">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <button class="sheet-close" onclick="dxfCrsCancel()" title="닫기">✕</button>
+    <h2>DXF 좌표계 선택</h2>
+    <p style="font-size:13px;color:#666;margin:2px 0 12px;">도면 원점에 맞게 <b>타원체(계열)</b>와 <b>원점</b>을 순서대로 선택하세요.</p>
+    <div class="field">
+      <label>① 타원체 / 계열</label>
+      <div id="dxfEllipRow" style="display:flex;gap:8px;">
+        <button type="button" class="dxf-el" data-el="grs80" onclick="dxfPickEllip('grs80')">🟢 GRS80<br><small>현행·설계도면</small></button>
+        <button type="button" class="dxf-el" data-el="bessel" onclick="dxfPickEllip('bessel')">🟡 Bessel<br><small>구계열·지적/구도면</small></button>
+      </div>
+    </div>
+    <div class="field">
+      <label>② 원점</label>
+      <div id="dxfOriginRow" style="display:flex;flex-wrap:wrap;gap:8px;"><span style="font-size:12px;color:#aaa;">타원체를 먼저 선택하세요</span></div>
+    </div>
+    <p style="font-size:12px;color:#888;margin:2px 0 10px;">※ 원점 판별(도엽번호 3번째 자리): 5=서부 · 6/7=중부 · 8/9=동부(울릉=동해원점)</p>
+    <div style="display:flex;gap:8px;">
+      <button type="button" onclick="dxfCrsCancel()" style="flex:1;padding:11px 0;border:1px solid #ddd;border-radius:9px;background:#f5f5f5;font-weight:700;cursor:pointer;">취소</button>
+      <button type="button" id="dxfCrsOk" onclick="dxfCrsConfirm()" style="flex:2;padding:11px 0;border:0;border-radius:9px;background:#1565c0;color:#fff;font-weight:700;cursor:pointer;opacity:.5;" disabled>이 좌표계로 불러오기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 포인트 위치 이동 모드 배너 (§12.2[4]) — 별도 모드로만 이동, 원본 사진 EXIF 불변 -->
+<div id="moveBar">
+  <span id="moveMsg">📍 위치 이동 — 주황 마커를 끌어 옮긴 뒤 저장하세요</span>
+  <button class="mb-save" onclick="saveMove()">이동 저장</button>
+  <button class="mb-cancel" onclick="cancelMove()">취소</button>
 </div>
 
 <!-- 레이어 (배경지도 + 오버레이 + 참조 도형 DXF/SHP) 통합 시트 -->
@@ -645,24 +785,16 @@
     </div>
     <input type="file" id="importInput" accept=".json,application/json" style="display:none" onchange="importJSON(event)">
 
-    <div class="section-cap" style="color:#1565c0;">참조 도형 레이어 (DXF / SHP) — 끄고켜기</div>
-    <div class="export-option" onclick="document.getElementById('dxfInput').click()">
-      <div class="icon">📐</div>
+    <div class="section-cap" style="color:#1565c0;">참조 도형 레이어 (DXF / SHP / KML) — 끄고켜기</div>
+    <div class="export-option" onclick="document.getElementById('refLayerInput').click()">
+      <div class="icon">📎</div>
       <div>
-        <div class="label">DXF 올리기 (설계도면)</div>
-        <div class="desc">업로드 시 원점 선택(5185 서부 / 5186 중부 / 5187 동부 / 5188 동해). 🗺️ 레이어 버튼에서 토글</div>
+        <div class="label">참조 레이어 올리기 (DXF·SHP·KML/KMZ)</div>
+        <div class="desc">확장자로 자동 구분 · <b>DXF</b>=설계도면(업로드 후 원점 선택창 — GRS80 5185~5188 / Bessel 5173~5177) · <b>SHP</b>=.shp/.dbf/.prj 담긴 .zip(좌표계 자동인식) · <b>KML/KMZ</b>=WGS84라 좌표계 선택 불필요. 🗺️ 레이어 버튼에서 토글</div>
       </div>
     </div>
-    <input type="file" id="dxfInput" accept=".dxf" style="display:none" onchange="uploadDxf(this.files[0]); this.value=''">
-    <div class="export-option" onclick="document.getElementById('shpInput').click()">
-      <div class="icon">🗺️</div>
-      <div>
-        <div class="label">SHP 올리기 (.zip)</div>
-        <div class="desc">.shp/.dbf/.prj 가 담긴 zip — 좌표계(.prj) 자동 인식. 🗺️ 레이어 버튼에서 토글</div>
-      </div>
-    </div>
-    <input type="file" id="shpInput" accept=".zip" style="display:none" onchange="uploadShp(this.files[0]); this.value=''">
-    <div style="font-size:11px;color:#b71c1c;margin:2px 0 6px;">⚠ 개발단계 — 너무 무거운(수만 요소) DXF/SHP는 앱이 느려질 수 있어 지양 권장. 올린 레이어는 <b>🗺️ 레이어 버튼</b>에서 끄고켜기·삭제, <b>📋 목록</b>에서 사업 이동·복사.</div>
+    <input type="file" id="refLayerInput" accept=".dxf,.zip,.kml,.kmz" style="display:none" onchange="uploadRefLayer(this.files[0]); this.value=''">
+    <div style="font-size:11px;color:#b71c1c;margin:2px 0 6px;">⚠ 개발단계 — 너무 무거운(수만 요소) DXF/SHP/KML은 앱이 느려질 수 있어 지양 권장. 올린 레이어는 <b>🗺️ 레이어 버튼</b>에서 끄고켜기·삭제, <b>📋 목록</b>에서 사업 이동·복사.</div>
 
     <div class="section-cap">데이터 삭제 (되돌릴 수 없음)</div>
     <div class="export-option danger" onclick="clearCurrentProject()">
@@ -689,7 +821,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ========== 공통 상수 ==========
-const BUILD = '2026-06-29c (사진 EXIF 보존 + CSV 군집화 정보: 사업명·귀속도형·귀속유형/방식·갈래확인 컬럼 + 군집별 정렬)';
+const BUILD = '2026-07-01f (촬영방향 표시 — EXIF GPSImgDirection/DJI XMP, 참고용)';
 console.log('현장조사 build:', BUILD);
 const KINDS = ['하천', '소하천', '댐지점', '구조물', '불법시설물', '기타'];
 function kindOptions(sel) {
@@ -705,7 +837,9 @@ const VWORLD_KEY = 'BBCD79DD-0859-3B41-A7C9-34898DA8FC43';
 const vworldUrl = (layer, ext) =>
   `https://api.vworld.kr/req/wmts/1.0.0/${VWORLD_KEY}/${layer}/{z}/{y}/{x}.${ext}`;
 
-const map = L.map('map', { zoomControl: false }).setView([36.5, 127.8], 7); // 대한민국 중심
+// closePopupOnClick:false — 겹친지점 목록↔상세↔사진확대를 setPopupContent로 전환할 때
+//   교체되는 노드로 인해 클릭이 지도로 전파돼 팝업이 닫히던 문제 차단(§12.2[2] 연속작업).
+const map = L.map('map', { zoomControl: false, closePopupOnClick: false }).setView([36.5, 127.8], 7); // 대한민국 중심
 
 const vBase   = L.tileLayer(vworldUrl('Base', 'png'),       { maxZoom: 19, attribution: 'VWorld' });
 const vSat    = L.tileLayer(vworldUrl('Satellite', 'jpeg'), { maxZoom: 19, attribution: 'VWorld' });
@@ -783,6 +917,16 @@ function onBaseChanged(sat) {
 map.createPane('refShapes');
 map.getPane('refShapes').style.zIndex = 450;   // 마커(600)보다 아래, 타일(200)보다 위
 const refRenderer = L.svg({ pane: 'refShapes' });
+// DXF 텍스트(측점) 라벨 전용 pane — refShapes(455)보다 위, 사진마커(600)보다 아래.
+// 별도 pane으로 두어 위성 CSS필터(밝기보정) 영향을 안 받고, 줌 임계값으로 저줌 클러터 억제.
+map.createPane('dxfLabels');
+map.getPane('dxfLabels').style.zIndex = 460;
+const DXF_LABEL_MINZOOM = 14;   // 이 줌 미만에서는 라벨 숨김(측점 과밀 방지)
+function updateDxfLabelVis() {
+  const p = map.getPane('dxfLabels');
+  if (p) p.style.display = (map.getZoom() >= DXF_LABEL_MINZOOM) ? '' : 'none';
+}
+map.on('zoomend', updateDxfLabelVis);
 L.control.zoom({ position: 'topright' }).addTo(map);
 L.control.scale({ position: 'bottomleft', metric: true, imperial: false, maxWidth: 140 }).addTo(map);
 
@@ -802,6 +946,152 @@ const NorthArrow = L.Control.extend({
 });
 map.addControl(new NorthArrow());
 
+// 주소 검색(§12.2[8]) — VWorld 검색 API 재사용(기보유 VWORLD_KEY, 별도 키 불필요)
+let addrSearchMarker = null;
+const AddressSearch = L.Control.extend({
+  options: { position: 'topleft' },
+  onAdd() {
+    const wrap = L.DomUtil.create('div', 'addr-search');
+    wrap.innerHTML = `
+      <div class="addr-search-btn" id="addrSearchBtn" title="주소 검색">🔍</div>
+      <div class="addr-search-box" id="addrSearchBox">
+        <div class="as-row">
+          <input type="text" id="addrSearchInput" placeholder="주소 입력 (지번/도로명)">
+          <button type="button" class="as-go" id="addrSearchGo">검색</button>
+        </div>
+        <div id="addrSearchResult"></div>
+      </div>`;
+    L.DomEvent.disableClickPropagation(wrap);
+    L.DomEvent.disableScrollPropagation(wrap);
+    return wrap;
+  }
+});
+map.addControl(new AddressSearch());
+
+document.getElementById('addrSearchBtn').addEventListener('click', () => {
+  const box = document.getElementById('addrSearchBox');
+  const btn = document.getElementById('addrSearchBtn');
+  const willOpen = !box.classList.contains('open');
+  box.classList.toggle('open', willOpen);
+  btn.classList.toggle('active', willOpen);
+  if (willOpen) document.getElementById('addrSearchInput').focus();
+});
+document.getElementById('addrSearchGo').addEventListener('click', runAddressSearch);
+document.getElementById('addrSearchInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') runAddressSearch();
+});
+
+// VWorld req/search는 fetch(CORS) 응답을 막아둠(WMTS 타일은 <img>라 무관하게 됨) → JSONP(callback)로 우회.
+function vworldJsonp(url) {
+  return new Promise((resolve) => {
+    const cbName = '_vwCb' + Date.now() + Math.floor(Math.random() * 1e4);
+    const timer = setTimeout(() => { cleanup(); resolve(null); }, 6000);
+    function cleanup() {
+      clearTimeout(timer);
+      delete window[cbName];
+      if (script.parentNode) script.parentNode.removeChild(script);
+    }
+    window[cbName] = (data) => { cleanup(); resolve(data); };
+    const script = document.createElement('script');
+    script.src = url + '&callback=' + cbName;
+    script.onerror = () => { cleanup(); resolve(null); };
+    document.head.appendChild(script);
+  });
+}
+
+async function vworldAddressQuery(query, category) {
+  const url = `https://api.vworld.kr/req/search?service=search&request=search&version=2.0`
+    + `&crs=EPSG:4326&query=${encodeURIComponent(query)}&type=address&category=${category}`
+    + `&format=json&errorformat=json&size=10&page=1`
+    + `&key=${VWORLD_KEY}&domain=${location.hostname}`;
+  const data = await vworldJsonp(url);
+  if (data && data.response && data.response.status === 'OK') {
+    return (data.response.result && data.response.result.items) || [];
+  }
+  return [];
+}
+
+// 행정구역(시도/시군구/읍면동/리) 자체를 하나의 결과로 반환 — road/parcel 검색은 "간전면" 같은 구역명 자체를
+// 결과로 주지 않고(건물주소만 나옴) 구역명이 포함된 건물주소 수천 건을 반환하므로 별도 API(type=district) 필요.
+// L1~L4를 병렬 조회해 병합(레벨별 상세도 다름 → 줌 레벨도 레벨별로 다르게).
+const DISTRICT_ZOOM = { L1: 10, L2: 12, L3: 13, L4: 14 };
+async function vworldDistrictQuery(query) {
+  const levels = Object.keys(DISTRICT_ZOOM);
+  const perLevel = await Promise.all(levels.map(async (lv) => {
+    const url = `https://api.vworld.kr/req/search?service=search&request=search&version=2.0`
+      + `&crs=EPSG:4326&query=${encodeURIComponent(query)}&type=district&category=${lv}`
+      + `&format=json&errorformat=json&size=10&page=1`
+      + `&key=${VWORLD_KEY}&domain=${location.hostname}`;
+    const data = await vworldJsonp(url);
+    if (data && data.response && data.response.status === 'OK') {
+      const items = (data.response.result && data.response.result.items) || [];
+      return items.map((it) => ({ ...it, _kind: 'district', _zoom: DISTRICT_ZOOM[lv] }));
+    }
+    return [];
+  }));
+  const seen = new Set();
+  const merged = [];
+  perLevel.flat().forEach((it) => {
+    if (seen.has(it.id)) return;
+    seen.add(it.id);
+    merged.push(it);
+  });
+  return merged;
+}
+
+// 검색 결과 표시용 라벨: 행정구역은 title, 그 외는 건물명(있으면) 우선 → 도로명/지번 주소
+function addrItemLabel(it) {
+  if (it._kind === 'district') return `🏛️ ${it.title}`;
+  const a = it.address || {};
+  return a.bldnm || a.road || a.parcel || '(이름 없음)';
+}
+
+async function runAddressSearch() {
+  const input = document.getElementById('addrSearchInput');
+  const resultBox = document.getElementById('addrSearchResult');
+  const query = input.value.trim();
+  if (!query) return;
+  resultBox.innerHTML = `<div class="addr-empty">검색 중…</div>`;
+  const districtItems = await vworldDistrictQuery(query);
+  let addrItems = await vworldAddressQuery(query, 'road');
+  if (!addrItems.length) addrItems = await vworldAddressQuery(query, 'parcel');
+  const items = [...districtItems, ...addrItems];
+  if (!items.length) {
+    resultBox.innerHTML = `<div class="addr-empty">검색 결과가 없습니다.</div>`;
+    return;
+  }
+  if (items.length === 1) {
+    selectAddressResult(items[0]);
+    return;
+  }
+  resultBox.innerHTML = `<div class="addr-result-list">`
+    + items.map((it, i) => `<div class="addr-result-item${it._kind === 'district' ? ' addr-result-district' : ''}" data-i="${i}">${esc(addrItemLabel(it))}</div>`).join('')
+    + `</div>`;
+  resultBox.querySelectorAll('.addr-result-item').forEach((el) => {
+    el.addEventListener('click', () => selectAddressResult(items[+el.dataset.i]));
+  });
+}
+
+function selectAddressResult(item) {
+  const lng = parseFloat(item.point && item.point.x);
+  const lat = parseFloat(item.point && item.point.y);
+  if (!isFinite(lat) || !isFinite(lng)) return;
+  if (addrSearchMarker) { map.removeLayer(addrSearchMarker); addrSearchMarker = null; }
+  const isDistrict = item._kind === 'district';
+  const title = isDistrict ? item.title : addrItemLabel(item);
+  const addr = (!isDistrict && item.address && (item.address.road || item.address.parcel)) || '';
+  addrSearchMarker = L.marker([lat, lng]).addTo(map)
+    .bindPopup(`<b>📍 ${esc(title)}</b>`
+      + (addr && addr !== title ? `<div style="font-size:12px;color:#555;">${esc(addr)}</div>` : '')
+      + `<div class="addr-src-note">출처: VWorld 지오코더</div>`)
+    .openPopup();
+  map.setView([lat, lng], isDistrict ? item._zoom : 17);
+  const box = document.getElementById('addrSearchBox');
+  const btn = document.getElementById('addrSearchBtn');
+  box.classList.remove('open');
+  btn.classList.remove('active');
+}
+
 let vworldFailed = false;
 vBase.on('tileerror', () => {
   if (vworldFailed) return;
@@ -813,16 +1103,22 @@ vBase.on('tileerror', () => {
 // 배경에 따라 마커 가시색 결정 — divIcon(DOM) 기반으로 Canvas/SVG 렌더러 의존 제거
 // (circleMarker Canvas 렌더가 안드로이드 일괄 추가 시 flush 안 되는 문제 근본 해결)
 let isSatellite = false;
-function createMarkerIcon() {
+function createMarkerIcon(count) {
   const bg  = isSatellite ? '#ff2d95' : '#43a047';
   const bdr = isSatellite ? '#ffffff' : '#2e7d32';
+  // 겹친(유사) 포인트: 우상단에 장수 배지 → 탭하면 목록 팝업(§12.2[2])
+  const badge = (count && count > 1)
+    ? `<div style="position:absolute;top:-8px;right:-8px;min-width:16px;height:16px;padding:0 3px;border-radius:8px;background:#1565c0;color:#fff;font-size:11px;font-weight:700;line-height:16px;text-align:center;border:1.5px solid #fff;box-sizing:border-box;box-shadow:0 1px 3px rgba(0,0,0,0.4);">${count}</div>`
+    : '';
   return L.divIcon({
     className: '',
-    html: `<div style="width:18px;height:18px;border-radius:50%;background:${bg};border:2.5px solid ${bdr};box-shadow:0 1px 4px rgba(0,0,0,0.45);"></div>`,
+    html: `<div style="position:relative;width:18px;height:18px;">`
+        + `<div style="width:18px;height:18px;border-radius:50%;background:${bg};border:2.5px solid ${bdr};box-shadow:0 1px 4px rgba(0,0,0,0.45);"></div>`
+        + badge + `</div>`,
     iconSize: [18, 18], iconAnchor: [9, 9], popupAnchor: [0, -9]
   });
 }
-function applyMarkerStyles() { recordMarkers.forEach(m => m.setIcon(createMarkerIcon())); }
+function applyMarkerStyles() { recordMarkers.forEach(m => m.setIcon(createMarkerIcon(m._groupCount))); }
 
 // 지적도(WMS 래스터)는 노란 경계선이 위성 배경에서 잘 안 보임 → 위성일 때 타일에 필터로 흰계열 보정
 function applyCadastralStyle() {
@@ -851,6 +1147,7 @@ let currentPos = null;
 let currentPhoto = null;
 let currentPhotoName = null;   // 최초 불러온 사진의 원본 파일명(내보내기 파일명·CSV에 사용)
 let currentShot = null;        // EXIF 촬영일시(ms). 없으면 null → 등록시각으로 폴백
+let currentDir = null;         // 촬영방향 {deg, src:'exif'|'dji'}. 없으면 null(기기가 방향을 안 남긴 경우 다수)
 let photoLocated = false;
 let editId = null;
 let cameFromList = false;   // 목록에서 수정 진입 → 저장 후 목록 복귀
@@ -1138,43 +1435,237 @@ async function deleteProject() {
 
 // ========== 마커 표시 ==========
 let recordMarkers = [];
+let groupData = {};              // gid → {items:[{r,la,ln}], marker} (겹친 지점 목록 팝업용)
+let markerFeatById = new Map();  // featureId → feature (팝업 도형명 표기)
+const SAME_POINT_M = 5;          // 이 거리(m) 이내면 "같은 지점"으로 묶어 목록 팝업(§12.2[2])
+
+// 두 위경도 사이 근사 거리(m) — equirectangular(수 m 규모라 충분)
+function distM(la1, ln1, la2, ln2) {
+  const R = 6371000, d = Math.PI / 180;
+  const x = (ln2 - ln1) * d * Math.cos((la1 + la2) / 2 * d);
+  const y = (la2 - la1) * d;
+  return Math.sqrt(x * x + y * y) * R;
+}
+// 단일 조사 팝업 HTML (마커 직접 / 겹침목록에서 선택 시 공용)
+function recordPopupHtml(r, gid) {
+  gid = gid || '';
+  const when = new Date(r.time).toLocaleString('ko-KR');
+  const feat = r.featureId ? markerFeatById.get(r.featureId) : null;
+  const riverLine = feat
+    ? `<br><span style="color:#1565c0;">${featIcon(feat.category || '하천')} ${esc(feat.name)}</span>${r.featureAmbiguous ? ' <span style="color:#e65100;">⚠갈래확인</span>' : ''}`
+    : '';
+  const img = r.photo
+    ? `<img src="${r.photo}" style="width:160px;border-radius:6px;display:block;margin-top:6px;cursor:pointer;" onclick="openPhotoView('${r.id}','${gid}')" title="클릭하면 크게 보기">`
+    : '';
+  const fnameLine = r.fileName
+    ? `<br><small style="color:#555;word-break:break-all;">📎 ${esc(r.fileName)}</small>`
+    : '';
+  const dirLine = (typeof r.dirDeg === 'number')
+    ? `<br><small style="color:#6a1b9a;" title="스마트폰 나침반은 촬영 순간 자북 보정이 안 돼 있으면 값이 다소 부정확할 수 있음(참고용). 정북(진북) 기준.">🧭 ${dirArrowText(r.dirDeg)} (${Math.round(r.dirDeg)}°${r.dirSrc === 'dji' ? ', 드론' : ''}, 참고용)</small>`
+    : '';
+  // 그룹 컨텍스트면 삭제는 목록으로 복귀(연속작업), 단일이면 지도 유지
+  const delCall = gid ? `deleteFromGroup('${gid}','${r.id}')` : `removeFromMap('${r.id}')`;
+  const actions =
+    `<div style="margin-top:8px;display:flex;gap:6px;">` +
+    `<span style="flex:1;text-align:center;color:#00695c;cursor:pointer;font-weight:700;border:1px solid #b2dfdb;border-radius:6px;padding:6px 0;" onclick="startMove('${r.id}')">📍 위치이동</span>` +
+    `<span style="flex:1;text-align:center;color:#1565c0;cursor:pointer;font-weight:700;border:1px solid #cfe0f5;border-radius:6px;padding:6px 0;" onclick="editFromMap('${r.id}')">정보수정</span>` +
+    `<span style="flex:1;text-align:center;color:#d32f2f;cursor:pointer;font-weight:700;border:1px solid #f3d2d2;border-radius:6px;padding:6px 0;" onclick="${delCall}">🗑 삭제</span>` +
+    `</div>`;
+  return `<b>${r.kind}</b>${riverLine}<br>${r.memo || '(메모 없음)'}<br><small>${when}</small>${fnameLine}${dirLine}${img}${actions}`;
+}
+// 겹친 지점 목록 팝업 HTML
+function groupListHtml(id) {
+  const g = groupData[id];
+  if (!g) return '';
+  const rows = g.items.map(({ r }) => {
+    const thumb = r.photo
+      ? `<img src="${r.photo}" style="width:44px;height:44px;object-fit:cover;border-radius:5px;flex-shrink:0;">`
+      : `<div style="width:44px;height:44px;border-radius:5px;background:#eef1f4;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">📝</div>`;
+    const when = new Date(r.shotTime || r.time).toLocaleString('ko-KR');
+    const title = r.fileName ? esc(r.fileName) : (r.kind || '(제목 없음)');
+    // 정보영역(썸네일+제목) 탭 → 상세로 전환. 오른쪽 기능버튼은 각자 동작(전파 차단).
+    const btn = (color, bd, label, call) =>
+      `<span style="flex:1;text-align:center;color:${color};border:1px solid ${bd};border-radius:5px;padding:4px 0;font-size:11px;font-weight:700;cursor:pointer;" onclick="event.stopPropagation();${call}">${label}</span>`;
+    return `<div style="padding:6px 4px;border-bottom:1px solid #eee;">`
+      + `<div style="display:flex;gap:8px;align-items:center;cursor:pointer;" onclick="showGroupRecord('${id}','${r.id}')">`
+      + thumb
+      + `<div style="min-width:0;flex:1;"><div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${title}</div>`
+      + `<div style="font-size:11px;color:#777;">${r.kind || ''} · ${when}</div></div>`
+      + `<span style="color:#bbb;font-size:16px;">›</span></div>`
+      + `<div style="display:flex;gap:5px;margin-top:5px;">`
+      + btn('#2e7d32', '#c8e6c9', '파일명', `renamePhotoFile('${r.id}','${id}')`)
+      + btn('#1565c0', '#cfe0f5', '정보수정', `editFromMap('${r.id}')`)
+      + btn('#d32f2f', '#f3d2d2', '삭제', `deleteFromGroup('${id}','${r.id}')`)
+      + `</div></div>`;
+  }).join('');
+  return `<div style="min-width:240px;"><b>📍 이 지점 사진 ${g.items.length}장</b>`
+    + `<div style="font-size:11px;color:#888;margin:2px 0 6px;">겹친 지점 — 하나를 선택하세요</div>`
+    + `<div style="max-height:300px;overflow:auto;">${rows}</div></div>`;
+}
+function showGroupRecord(id, rid) {
+  const g = groupData[id]; if (!g) return;
+  const item = g.items.find(x => x.r.id === rid); if (!item) return;
+  const back = `<div style="color:#1565c0;cursor:pointer;font-weight:700;font-size:13px;margin-bottom:6px;" onclick="showGroupList('${id}')">← 목록 (${g.items.length}장)</div>`;
+  g.marker.setPopupContent(back + recordPopupHtml(item.r, id));
+}
+function showGroupList(id) {
+  const g = groupData[id]; if (!g) return;
+  g.marker.setPopupContent(groupListHtml(id));
+}
+// 겹친 목록/상세에서 삭제 — 팝업 유지(연속작업). 1건 이하로 줄면 그룹 해제 후 재구성.
+async function deleteFromGroup(id, rid) {
+  if (!confirm('이 조사를 삭제할까요?')) return;
+  await deleteRecord(rid);
+  const g = groupData[id];
+  if (g && g.items.length > 2) {
+    g.items = g.items.filter(x => x.r.id !== rid);
+    g.marker._groupCount = g.items.length;
+    g.marker.setIcon(createMarkerIcon(g.items.length));
+    g.marker.setPopupContent(groupListHtml(id));   // 목록에 머무름
+  } else {
+    map.closePopup();          // 남은 1건은 단일 마커로 재구성
+    await loadMarkers();
+  }
+}
+
 async function loadMarkers() {
   recordMarkers.forEach(m => map.removeLayer(m));
   recordMarkers = [];
+  groupData = {};
   const all = (await getAll()).filter(r => r.projectId === currentProjectId);
   // 귀속 하천선 이름 조회용 맵 (마커 팝업에 "🏞️ ○○천" 표기)
-  const featById = new Map(
+  markerFeatById = new Map(
     (await getAllFeatures()).filter(f => f.projectId === currentProjectId).map(f => [f.id, f]));
   let drawn = 0, badLoc = 0;
+  // 1) 유효 좌표만 추리기
+  const valid = [];
   all.forEach(r => {
-    // 좌표를 Number로 변환해 수용(문자열 좌표도 처리). 무효하면 카운트만 하고 skip
     const la = Number(r.lat), ln = Number(r.lng);
     if (!isFinite(la) || !isFinite(ln)) { badLoc++; return; }
-    drawn++;
-    const m = L.marker([la, ln], { icon: createMarkerIcon() }).addTo(map);
-    const when = new Date(r.time).toLocaleString('ko-KR');
-    const feat = r.featureId ? featById.get(r.featureId) : null;
-    const riverLine = feat
-      ? `<br><span style="color:#1565c0;">${featIcon(feat.category || '하천')} ${esc(feat.name)}</span>${r.featureAmbiguous ? ' <span style="color:#e65100;">⚠갈래확인</span>' : ''}`
-      : '';
-    const img = r.photo
-      ? `<img src="${r.photo}" style="width:160px;border-radius:6px;display:block;margin-top:6px;cursor:pointer;" onclick="openPhotoView('${r.id}')" title="클릭하면 크게 보기">`
-      : '';
-    const fnameLine = r.fileName
-      ? `<br><small style="color:#555;word-break:break-all;">📎 ${esc(r.fileName)}</small>`
-      : '';
-    const actions =
-      `<div style="margin-top:8px;display:flex;gap:6px;">` +
-      `<span style="flex:1;text-align:center;color:#1565c0;cursor:pointer;font-weight:700;border:1px solid #cfe0f5;border-radius:6px;padding:6px 0;" onclick="editFromMap('${r.id}')">✏️ 수정</span>` +
-      `<span style="flex:1;text-align:center;color:#d32f2f;cursor:pointer;font-weight:700;border:1px solid #f3d2d2;border-radius:6px;padding:6px 0;" onclick="removeFromMap('${r.id}')">🗑 삭제</span>` +
-      `</div>`;
-    m.bindPopup(`<b>${r.kind}</b>${riverLine}<br>${r.memo || '(메모 없음)'}<br><small>${when}</small>${fnameLine}${img}${actions}`);
-    recordMarkers.push(m);
+    valid.push({ r, la, ln });
+  });
+  drawn = valid.length;
+  // 2) 근접(≤SAME_POINT_M) 묶기 — 첫 항목 좌표를 앵커로 하는 단순 그리디
+  const groups = [];
+  valid.forEach(item => {
+    let g = groups.find(g => distM(g.la, g.ln, item.la, item.ln) <= SAME_POINT_M);
+    if (!g) { g = { la: item.la, ln: item.ln, items: [] }; groups.push(g); }
+    g.items.push(item);
+  });
+  // 3) 그룹 = 1건이면 단일 팝업, 2건+면 목록 팝업(배지)
+  let gseq = 0;
+  groups.forEach(g => {
+    const anchor = g.items[0];
+    if (g.items.length === 1) {
+      const m = L.marker([anchor.la, anchor.ln], { icon: createMarkerIcon(1) }).addTo(map);
+      m._groupCount = 1;
+      m._recordId = anchor.r.id;   // 지도 드래그 다중선택(§12.2[9])에서 조회용
+      m.bindPopup(recordPopupHtml(anchor.r));
+      recordMarkers.push(m);
+    } else {
+      const id = 'g' + (gseq++);
+      const m = L.marker([anchor.la, anchor.ln], { icon: createMarkerIcon(g.items.length) }).addTo(map);
+      m._groupCount = g.items.length;
+      m._groupKey = id;   // 지도 드래그 다중선택(§12.2[9])에서 groupData 조회용
+      groupData[id] = { items: g.items, marker: m };
+      m.bindPopup(groupListHtml(id));
+      // 닫았다 다시 열면(또는 마커 재탭) 마지막 본 사진 상세가 아니라 항상 '목록'부터 보이게 리셋
+      m.on('popupclose', () => { if (groupData[id]) m.setPopupContent(groupListHtml(id)); });
+      recordMarkers.push(m);
+    }
   });
   document.getElementById('count').textContent =
     `조사: ${all.length}건` + (badLoc ? ` · 지도표시 ${drawn} · ⚠위치없음 ${badLoc}` : '');
   await loadFeatures();
 }
+
+// ========== 지도 드래그 다중선택(§12.2[9]) ==========
+// 여러 지점을 한 번에 지우고 싶다는 의견 → 목록 체크박스 다중선택과 별도로,
+// 지도에서 영역을 드래그해 마커 여러 개를 한 번에 selectedIds에 담는 방식.
+let mapSelectMode = false;
+let selDragStart = null;
+let selRectEl = null;
+
+function toggleMapSelectMode() {
+  mapSelectMode = !mapSelectMode;
+  const fab = document.getElementById('mapSelFab');
+  const bar = document.getElementById('mapSelBar');
+  if (mapSelectMode) {
+    map.dragging.disable();
+    if (map.tap) map.tap.disable();
+    map.getContainer().style.cursor = 'crosshair';
+    if (fab) fab.classList.add('active');
+    if (bar) bar.style.display = 'flex';
+  } else {
+    map.dragging.enable();
+    if (map.tap) map.tap.enable();
+    map.getContainer().style.cursor = '';
+    if (fab) fab.classList.remove('active');
+    if (bar) bar.style.display = 'none';
+    clearSelRect();
+  }
+}
+function clearSelRect() {
+  if (selRectEl) { selRectEl.remove(); selRectEl = null; }
+  selDragStart = null;
+}
+function selPoint(e) {
+  const rect = map.getContainer().getBoundingClientRect();
+  const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]) || e;
+  return { x: t.clientX - rect.left, y: t.clientY - rect.top };
+}
+function onMapSelStart(e) {
+  if (!mapSelectMode) return;
+  e.preventDefault();
+  selDragStart = selPoint(e);
+  selRectEl = document.createElement('div');
+  selRectEl.className = 'map-sel-rect';
+  map.getContainer().appendChild(selRectEl);
+  updateSelRect(selDragStart);
+}
+function onMapSelMove(e) {
+  if (!mapSelectMode || !selDragStart) return;
+  e.preventDefault();
+  updateSelRect(selPoint(e));
+}
+function updateSelRect(cur) {
+  if (!selRectEl || !selDragStart) return;
+  const x = Math.min(selDragStart.x, cur.x), y = Math.min(selDragStart.y, cur.y);
+  const w = Math.abs(cur.x - selDragStart.x), h = Math.abs(cur.y - selDragStart.y);
+  Object.assign(selRectEl.style, { left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px' });
+}
+async function onMapSelEnd(e) {
+  if (!mapSelectMode || !selDragStart) return;
+  const cur = selPoint(e);
+  const x0 = Math.min(selDragStart.x, cur.x), x1 = Math.max(selDragStart.x, cur.x);
+  const y0 = Math.min(selDragStart.y, cur.y), y1 = Math.max(selDragStart.y, cur.y);
+  clearSelRect();
+  if ((x1 - x0) < 6 && (y1 - y0) < 6) return;   // 드래그 폭이 거의 없으면(탭) 무시
+  let added = 0;
+  recordMarkers.forEach(m => {
+    const p = map.latLngToContainerPoint(m.getLatLng());
+    if (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1) return;
+    if (m._groupKey && groupData[m._groupKey]) {
+      groupData[m._groupKey].items.forEach(it => { if (!selectedIds.has(it.r.id)) { selectedIds.add(it.r.id); added++; } });
+    } else if (m._recordId && !selectedIds.has(m._recordId)) {
+      selectedIds.add(m._recordId); added++;
+    }
+  });
+  if (!added) { alert('선택된 지점이 없습니다. 마커가 있는 곳을 드래그해 보세요.'); return; }
+  toggleMapSelectMode();   // 선택모드 종료 → 목록에서 결과 확인
+  selectMode = true;
+  await openList();
+  document.getElementById('selToggle').classList.add('on');
+  document.getElementById('selToggle').textContent = '☑️ 선택 해제';
+  document.getElementById('selBar').style.display = 'flex';
+  renderList();
+}
+map.getContainer().addEventListener('mousedown', onMapSelStart);
+map.getContainer().addEventListener('mousemove', onMapSelMove);
+window.addEventListener('mouseup', onMapSelEnd);
+map.getContainer().addEventListener('touchstart', onMapSelStart, { passive: false });
+map.getContainer().addEventListener('touchmove', onMapSelMove, { passive: false });
+map.getContainer().addEventListener('touchend', onMapSelEnd);
 
 // ========== 선형 도형(하천선·도로선 등) 표시 ==========
 // 선형은 하천에 한정되지 않음 — 도로작업이면 도로선이 될 수 있음(category로 구분).
@@ -1265,15 +1756,34 @@ function openFeatureRecords(featureId) {
 // ========== 참조 도형 레이어 (DXF/SHP 업로드 → 끄고켜기) ==========
 // ⚠ 개발단계: 수만 엔티티의 무거운 DXF/SHP는 앱이 느려질 수 있어 지양 권장(명세 §10.10).
 //   라이브러리는 사용 시점에 esm.sh에서 지연 로드(검증 버전 고정).
+// 현행(GRS80/Korea2000): 5185~5188 (y_0=600000). 정밀검증: 관식 EPSG 대비 오차 0.1m 미만.
+// 구계열(Bessel/Korea1985, 지적·구도면): 5173~5177 — 수정계열 경자오선(+0.0028902…°)·y_0=500000(제주5175=550000)
+//   +towgs84 7파라미터로 WGS84 변환(pyproj 관식 대비 0.1m 미만 검증).
+const BESSEL_TW = '+towgs84=-115.80,474.99,674.11,1.16,-2.31,-1.63,6.43';
 const PROJ_DEFS = {
   '5185': '+proj=tmerc +lat_0=38 +lon_0=125 +k=1 +x_0=200000 +y_0=600000 +ellps=GRS80 +units=m +no_defs',
   '5186': '+proj=tmerc +lat_0=38 +lon_0=127 +k=1 +x_0=200000 +y_0=600000 +ellps=GRS80 +units=m +no_defs',
   '5187': '+proj=tmerc +lat_0=38 +lon_0=129 +k=1 +x_0=200000 +y_0=600000 +ellps=GRS80 +units=m +no_defs',
-  '5188': '+proj=tmerc +lat_0=38 +lon_0=131 +k=1 +x_0=200000 +y_0=600000 +ellps=GRS80 +units=m +no_defs'
+  '5188': '+proj=tmerc +lat_0=38 +lon_0=131 +k=1 +x_0=200000 +y_0=600000 +ellps=GRS80 +units=m +no_defs',
+  '5173': `+proj=tmerc +lat_0=38 +lon_0=125.0028902777778 +k=1 +x_0=200000 +y_0=500000 +ellps=bessel +units=m ${BESSEL_TW} +no_defs`,
+  '5174': `+proj=tmerc +lat_0=38 +lon_0=127.0028902777778 +k=1 +x_0=200000 +y_0=500000 +ellps=bessel +units=m ${BESSEL_TW} +no_defs`,
+  '5175': `+proj=tmerc +lat_0=38 +lon_0=127.0028902777778 +k=1 +x_0=200000 +y_0=550000 +ellps=bessel +units=m ${BESSEL_TW} +no_defs`,
+  '5176': `+proj=tmerc +lat_0=38 +lon_0=129.0028902777778 +k=1 +x_0=200000 +y_0=500000 +ellps=bessel +units=m ${BESSEL_TW} +no_defs`,
+  '5177': `+proj=tmerc +lat_0=38 +lon_0=131.0028902777778 +k=1 +x_0=200000 +y_0=500000 +ellps=bessel +units=m ${BESSEL_TW} +no_defs`
 };
 async function ensureProj4() { if (!window.proj4) { const m = await import('https://esm.sh/proj4@2.20.9'); window.proj4 = m.default || m; } }
 async function ensureDxf()   { if (!window.DxfParser) { const m = await import('https://esm.sh/dxf-parser@1.1.2'); window.DxfParser = m.default || m; } }
 async function ensureShp()   { if (!window.shp) { const m = await import('https://esm.sh/shpjs@6.2.0'); window.shp = m.default || m; } }
+async function ensureJSZip() {
+  if (window.JSZip) return;
+  await new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/jszip/dist/jszip.min.js';
+    s.onload = res; s.onerror = rej;
+    document.head.appendChild(s);
+  });
+}
+async function ensureToGeoJSON() { if (!window.toGeoJSON) window.toGeoJSON = await import('https://esm.sh/@tmcw/togeojson@5.8.1'); }
 
 function intToHex(n) { if (n == null) return null; return '#' + (n & 0xFFFFFF).toString(16).padStart(6, '0'); }
 // TM(원점 def) 중심으로 원/호를 점열로 펼친 뒤 변환 (반지름 왜곡 없이 형상 보존). 각도=라디안.
@@ -1304,12 +1814,20 @@ function dxfToShapes(dxf, srcDef) {
         out.push({ k: 'line', pts: arcPts(e.center.x, e.center.y, e.radius, e.startAngle, e.endAngle, tr), color: col });
       } else if (e.type === 'POINT' && e.position) {
         out.push({ k: 'pt', pts: [tr(e.position.x, e.position.y)], color: col });
+      } else if ((e.type === 'TEXT' || e.type === 'MTEXT')) {
+        // 측점 등 라벨 텍스트 — TEXT는 startPoint, MTEXT는 position
+        const p = e.startPoint || e.position;
+        let t = (e.text || '').toString();
+        // MTEXT 서식코드(\fArial;, \H2.5;, {…}, \P 줄바꿈 등) 제거 → 순수 문자만
+        t = t.replace(/\\[A-Za-z][^;\\]*;?/g, '').replace(/[{}]/g, '').replace(/\\P/g, ' ').trim();
+        if (p && t) out.push({ k: 'text', pts: [tr(p.x, p.y)], text: t, color: col });
       }
     } catch (_) {}
   }
   return out;
 }
 
+function overlayIcon(kind) { return kind === 'dxf' ? '📐' : kind === 'kml' ? '🌍' : '🗺️'; }
 let overlayCtrlLayers = {};      // overlayId → Leaflet layer (레이어 시트에서 토글)
 // ★ 채움(hatch) 투명도 배경 적응(28b): 일반도에선 옅으면 안 보여 진하게(+10%p), 위성은 유지
 function refFill() { return isSatellite ? 0.12 : 0.22; }
@@ -1320,12 +1838,28 @@ function buildDxfLayer(shapes) {
     if (s.k === 'line') L.polyline(s.pts, { renderer: refRenderer, color: s.color, weight: 1.5, opacity: 0.95 }).addTo(g);
     else if (s.k === 'poly') L.polygon(s.pts, { renderer: refRenderer, color: s.color, weight: 1.5, opacity: 0.95, fillOpacity: fo }).addTo(g);
     else if (s.k === 'pt') L.circleMarker(s.pts[0], { renderer: refRenderer, radius: 3, color: s.color, weight: 2, fillOpacity: 0.9 }).addTo(g);
+    else if (s.k === 'text') {
+      // 측점 라벨: 배경 적응(일반=검정+흰테두리 / 위성=흰색+검은테두리). 클릭 방해 없게 non-interactive.
+      L.marker(s.pts[0], {
+        pane: 'dxfLabels', interactive: false, keyboard: false,
+        icon: L.divIcon({ className: 'dxf-label' + (isSatellite ? ' sat' : ''), iconSize: [0, 0], html: `<span>${esc(s.text)}</span>` })
+      }).addTo(g);
+    }
   });
   return g;
 }
-function shpColor() { return isSatellite ? '#00e5ff' : '#14315e'; }   // 배경적응: 위성=시안 / 일반=남색(+pane 외곽선)
-function buildShpLayer(geojson) {
-  const col = shpColor();
+function shpColor() { return isSatellite ? '#00e5ff' : '#14315e'; }   // 배경적응: 위성=시안 / 일반=남색(+pane 외곽선) — KML 등 단일색 유지용
+// SHP는 여러 개 올리면(예: 연도별 하천구역) 구분이 안 되던 문제 → 업로드 순서대로 팔레트 색 순차 배정(배경적응 유지)
+const SHP_PALETTE = {
+  normal: ['#14315e', '#8c2f2f', '#1f6e35', '#6a3d9a', '#b5651d', '#0f6b6b'],
+  sat:    ['#00e5ff', '#ff6e6e', '#69f0ae', '#e08cff', '#ffc266', '#5ce1e6']
+};
+function shpColorByIndex(idx) {
+  const pal = isSatellite ? SHP_PALETTE.sat : SHP_PALETTE.normal;
+  return pal[idx % pal.length];
+}
+function buildShpLayer(geojson, isShp, shpIdx) {
+  const col = isShp ? shpColorByIndex(shpIdx || 0) : shpColor();
   const fo = refFill();
   return L.geoJSON(geojson, {
     renderer: refRenderer,
@@ -1340,13 +1874,16 @@ async function loadOverlays() {
   }
   overlayCtrlLayers = {};
   const ovs = (await getAllOverlays()).filter(o => o.projectId === currentProjectId);
+  let shpIdx = 0;
   for (const o of ovs) {
-    const lyr = (o.kind === 'dxf') ? buildDxfLayer(o.shapes) : buildShpLayer(o.geojson);
+    const lyr = (o.kind === 'dxf') ? buildDxfLayer(o.shapes) : buildShpLayer(o.geojson, o.kind === 'shp', shpIdx);
+    if (o.kind === 'shp') shpIdx++;
     lyr._overlayId = o.id;
     overlayCtrlLayers[o.id] = lyr;
     if (o.visible !== false) lyr.addTo(map);
   }
   applyRefShapeStyle();
+  updateDxfLabelVis();   // 측점 라벨 줌 임계값 반영
   await renderLayerRefList();
 }
 // ===== 레이어 통합 시트 (배경지도 + 오버레이 + 참조 레이어) =====
@@ -1379,13 +1916,17 @@ async function renderLayerRefList() {
   const body = document.getElementById('layerRefList');
   if (!body) return;
   const ovs = (await getAllOverlays()).filter(o => o.projectId === currentProjectId);
-  if (!ovs.length) { body.innerHTML = '<div class="lay-empty">업로드된 참조 레이어가 없습니다. (내보내기 📤 → DXF/SHP 올리기)</div>'; return; }
-  body.innerHTML = ovs.map(o => `
+  if (!ovs.length) { body.innerHTML = '<div class="lay-empty">업로드된 참조 레이어가 없습니다. (내보내기 📤 → DXF/SHP/KML 올리기)</div>'; return; }
+  let shpIdx = 0;
+  body.innerHTML = ovs.map(o => {
+    const dot = o.kind === 'shp' ? `<span class="lay-dot" style="background:${shpColorByIndex(shpIdx++)}"></span>` : '';
+    return `
     <div class="lay-row">
       <input type="checkbox" ${o.visible !== false ? 'checked' : ''} onchange="toggleOverlay('${o.id}', this.checked)">
-      <span class="lay-name">${o.kind === 'dxf' ? '📐' : '🗺️'} ${esc(o.name)}</span>
+      ${dot}<span class="lay-name">${overlayIcon(o.kind)} ${esc(o.name)}</span>
       <span class="lay-del" onclick="removeOverlay('${o.id}')" title="삭제">🗑</span>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 async function toggleOverlay(id, on) {
   const lyr = overlayCtrlLayers[id];
@@ -1403,12 +1944,59 @@ async function saveOverlay(o) {
   await loadOverlays();
   alert(`참조 레이어 추가됨: ${rec.name}\n(🗺️ 레이어 버튼에서 끄고켜기·삭제 / 📋 목록에서 사업 이동·복사)`);
 }
+// DXF 좌표계 선택 UI (숫자 입력 대신 타원체×원점 버튼)
+const DXF_CRS = {
+  grs80:  { origins: [['서부', '5185'], ['중부', '5186'], ['동부', '5187'], ['울릉(동해)', '5188']] },
+  bessel: { origins: [['서부', '5173'], ['중부', '5174'], ['제주', '5175'], ['동부', '5176'], ['울릉(동해)', '5177']] }
+};
+let dxfCrsResolver = null;
+let dxfCrsSel = { el: null, epsg: null };
+function pickDxfCrs() {
+  return new Promise(resolve => {
+    dxfCrsResolver = resolve;
+    dxfCrsSel = { el: null, epsg: null };
+    document.querySelectorAll('#dxfEllipRow .dxf-el').forEach(b => b.classList.remove('on'));
+    document.getElementById('dxfOriginRow').innerHTML = '<span style="font-size:12px;color:#aaa;">타원체를 먼저 선택하세요</span>';
+    const ok = document.getElementById('dxfCrsOk'); ok.disabled = true; ok.style.opacity = '.5';
+    document.getElementById('dxfCrsOverlay').classList.add('show');
+  });
+}
+function dxfPickEllip(el) {
+  dxfCrsSel.el = el; dxfCrsSel.epsg = null;
+  document.querySelectorAll('#dxfEllipRow .dxf-el').forEach(b => b.classList.toggle('on', b.dataset.el === el));
+  document.getElementById('dxfOriginRow').innerHTML = DXF_CRS[el].origins
+    .map(([n, e]) => `<button type="button" class="dxf-or" data-epsg="${e}" onclick="dxfPickOrigin('${e}')">${n}<br><small>${e}</small></button>`).join('');
+  const ok = document.getElementById('dxfCrsOk'); ok.disabled = true; ok.style.opacity = '.5';
+}
+function dxfPickOrigin(epsg) {
+  dxfCrsSel.epsg = epsg;
+  document.querySelectorAll('#dxfOriginRow .dxf-or').forEach(b => b.classList.toggle('on', b.dataset.epsg === epsg));
+  const ok = document.getElementById('dxfCrsOk'); ok.disabled = false; ok.style.opacity = '1';
+}
+function dxfCrsConfirm() {
+  if (!dxfCrsSel.epsg) return;
+  document.getElementById('dxfCrsOverlay').classList.remove('show');
+  if (dxfCrsResolver) { dxfCrsResolver(dxfCrsSel.epsg); dxfCrsResolver = null; }
+}
+function dxfCrsCancel() {
+  document.getElementById('dxfCrsOverlay').classList.remove('show');
+  if (dxfCrsResolver) { dxfCrsResolver(null); dxfCrsResolver = null; }
+}
+// 참조 레이어 통합 입력 — 확장자로 DXF/SHP/KML(KMZ)를 분기(기존 개별 함수 그대로 재사용, 병합은 진입점만)
+function uploadRefLayer(file) {
+  if (!file) return;
+  const ext = (file.name.match(/\.([^.]+)$/) || [, ''])[1].toLowerCase();
+  if (ext === 'dxf') return uploadDxf(file);
+  if (ext === 'zip') return uploadShp(file);
+  if (ext === 'kml' || ext === 'kmz') return uploadKmz(file);
+  alert('지원하지 않는 형식입니다. (.dxf / .zip(SHP) / .kml / .kmz)');
+}
 async function uploadDxf(file) {
   if (!file) return;
-  const epsg = prompt('DXF 좌표 원점(GRS80 TM) 선택:\n5185=서부 / 5186=중부 / 5187=동부 / 5188=동해', '5186');
-  if (epsg === null) return;
-  const def = PROJ_DEFS[(epsg || '').trim()];
-  if (!def) { alert('5185 / 5186 / 5187 / 5188 중에서 선택하세요.'); return; }
+  const epsg = await pickDxfCrs();
+  if (epsg === null) return;              // 취소
+  const def = PROJ_DEFS[epsg];
+  if (!def) { alert('좌표계를 선택하세요.'); return; }
   try {
     await ensureProj4(); await ensureDxf();
     const Ctor = window.DxfParser.default || window.DxfParser;
@@ -1430,6 +2018,27 @@ async function uploadShp(file) {
     await saveOverlay({ kind: 'shp', name: file.name.replace(/\.zip$/i, ''), geojson: fc, count: fc.features.length });
   } catch (err) { alert('SHP 처리 실패: ' + (err && err.message || err) + '\n(.shp/.dbf/.prj 가 담긴 zip을 올려주세요)'); }
 }
+async function uploadKmz(file) {
+  if (!file) return;
+  try {
+    await ensureToGeoJSON();
+    let kmlText;
+    if (/\.kmz$/i.test(file.name)) {
+      await ensureJSZip();
+      const zip = await JSZip.loadAsync(await file.arrayBuffer());
+      const entry = Object.values(zip.files).find(f => !f.dir && /\.kml$/i.test(f.name));
+      if (!entry) { alert('KMZ 안에서 .kml 파일을 찾지 못했습니다.'); return; }
+      kmlText = await entry.async('text');
+    } else {
+      kmlText = await file.text();
+    }
+    const dom = new DOMParser().parseFromString(kmlText, 'text/xml');
+    if (dom.querySelector('parsererror')) { alert('KML 파싱 실패 — 파일이 손상되었을 수 있습니다.'); return; }
+    const fc = window.toGeoJSON.kml(dom);
+    if (!fc.features || !fc.features.length) { alert('KML/KMZ에서 도형을 찾지 못했습니다.'); return; }
+    await saveOverlay({ kind: 'kml', name: file.name.replace(/\.(kmz|kml)$/i, ''), geojson: fc, count: fc.features.length });
+  } catch (err) { alert('KML/KMZ 처리 실패: ' + (err && err.message || err)); }
+}
 async function removeOverlay(id) {
   const o = (await getAllOverlays()).find(x => x.id === id);
   if (!confirm(`참조 레이어 "${o ? o.name : ''}"을(를) 정말 삭제할까요?`)) return;
@@ -1445,7 +2054,7 @@ async function renderListLayers() {
   el.innerHTML = `<div class="ll-head">📂 참조 레이어 (DXF/SHP) ${ovs.length}개 — 사업 이동·복사·삭제</div>` +
     ovs.map(o => `
       <div class="ll-row">
-        <span class="ll-name">${o.kind === 'dxf' ? '📐' : '🗺️'} ${esc(o.name)}</span>
+        <span class="ll-name">${overlayIcon(o.kind)} ${esc(o.name)}</span>
         <button class="mini-btn" onclick="moveOverlay('${o.id}')">사업 이동</button>
         <button class="mini-btn danger" onclick="removeOverlayFromList('${o.id}')">삭제</button>
       </div>`).join('');
@@ -1521,7 +2130,7 @@ function locateMe() {
 function openForm() {
   editId = null; cameFromList = false;
   document.getElementById('formTitle').textContent = '조사 등록';
-  currentPhoto = null; currentPhotoName = null; currentShot = null; photoLocated = false;
+  currentPhoto = null; currentPhotoName = null; currentShot = null; currentDir = null; photoLocated = false;
   document.getElementById('preview').innerHTML = '';
   document.getElementById('memoInput').value = '';
   document.getElementById('kindInput').value = '하천';
@@ -1714,6 +2323,23 @@ async function readPhotoGps(file) {
     return (g && typeof g.latitude === 'number') ? { lat: g.latitude, lng: g.longitude } : null;
   } catch (_) { return null; }
 }
+// 촬영방향(§12.2[7]): 표준 EXIF GPSImgDirection(iPhone 등 일부 기종 — 진북 기준)이 있으면 우선 사용,
+// 없으면 DJI 드론 XMP(drone-dji:GimbalYawDegree)를 시도. 삼성 등 다수 안드로이드는 둘 다 없어 null.
+// ⚠ 실측(2026-07): 스마트폰 나침반은 촬영 순간 값이 부정확할 수 있음(자북 보정을 위해 기기를 흔들어야
+//   하는 나침반 특성상, 사진 찍는 짧은 순간에는 보정이 안 돼 있을 수 있음) — 참고용으로만 표시.
+const DIR8 = ['북', '북동', '동', '남동', '남', '남서', '서', '북서'];
+function bearingLabel(deg) { return DIR8[Math.round((((deg % 360) + 360) % 360) / 45) % 8]; }
+// "동→서": 카메라가 선 위치(추정, 촬영방향의 반대쪽) → 렌즈가 향한 방향(촬영방향) 순으로 표기
+function dirArrowText(deg) { return `${bearingLabel(deg + 180)}→${bearingLabel(deg)}`; }
+async function readDjiYaw(file) {
+  try {
+    // DJI 사진은 XMP 패킷이 파일 앞부분(APP1 뒤)에 있음 — 앞 256KB만 읽어 가볍게 탐색
+    const buf = await file.slice(0, 262144).arrayBuffer();
+    const text = new TextDecoder('latin1').decode(buf);
+    const m = text.match(/drone-dji:GimbalYawDegree="([+-]?[0-9.]+)"/) || text.match(/drone-dji:FlightYawDegree="([+-]?[0-9.]+)"/);
+    return m ? parseFloat(m[1]) : null;
+  } catch (_) { return null; }
+}
 // GPS와 촬영일시를 EXIF 한 번 파싱으로 함께 추출 (gps 호출과 별도 파싱하던 것을 통합)
 // 촬영일시 우선순위: DateTimeOriginal(실제 촬영) > CreateDate > ModifyDate. 업로드 시각이 아닌 '찍은 시각'.
 async function readPhotoMeta(file) {
@@ -1726,8 +2352,15 @@ async function readPhotoMeta(file) {
     let shot = null;
     const dt = d && (d.DateTimeOriginal || d.CreateDate || d.ModifyDate);
     if (dt) { const t = (dt instanceof Date) ? dt.getTime() : Date.parse(dt); if (isFinite(t)) shot = t; }
-    return { gps, shot };
-  } catch (_) { return { gps: null, shot: null }; }
+    let dir = null;
+    if (d && typeof d.GPSImgDirection === 'number' && isFinite(d.GPSImgDirection)) {
+      dir = { deg: ((d.GPSImgDirection % 360) + 360) % 360, src: 'exif' };
+    } else {
+      const yaw = await readDjiYaw(file);
+      if (yaw != null && isFinite(yaw)) dir = { deg: ((yaw % 360) + 360) % 360, src: 'dji' };
+    }
+    return { gps, shot, dir };
+  } catch (_) { return { gps: null, shot: null, dir: null }; }
 }
 // 위치없음 원인 진단: GPS 외 다른 EXIF(촬영일/기기)가 있으면 "위치만 제거됨"(안드로이드 사진선택 정책)으로 판별
 async function diagnoseExif(file) {
@@ -1761,14 +2394,16 @@ function fileToDataURL(file) {
 async function handlePhotoFile(file) {
   if (!file) return;
   currentPhotoName = file.name || null;
-  const meta = await withTimeout(readPhotoMeta(file), 12000).catch(() => ({ gps: null, shot: null }));
+  const meta = await withTimeout(readPhotoMeta(file), 12000).catch(() => ({ gps: null, shot: null, dir: null }));
   currentShot = meta.shot;          // EXIF 촬영일시(없으면 null → 저장 시 등록시각으로 폴백)
+  currentDir = meta.dir || null;    // 촬영방향(있으면) — 대부분 안드로이드는 null, iPhone 일부·드론은 있을 수 있음
   const gps = meta.gps;
   if (gps) {
     currentPos = gps; photoLocated = true;
     showSelectedLocation(gps.lat, gps.lng);
+    const dirNote = currentDir ? ` · 방향 ${dirArrowText(currentDir.deg)}(${Math.round(currentDir.deg)}°, 참고용·오차가능)` : '';
     document.getElementById('formMeta').textContent =
-      `📷 사진 위치정보 사용: ${gps.lat.toFixed(6)}, ${gps.lng.toFixed(6)} (등록 시 기록됨)`;
+      `📷 사진 위치정보 사용: ${gps.lat.toFixed(6)}, ${gps.lng.toFixed(6)} (등록 시 기록됨)${dirNote}`;
     refreshAutoAttribution();
   } else if (!currentPos) {
     // 사진에 위치정보가 없음(안드로이드 갤러리는 EXIF GPS가 제거됨) → 수동 지정 안내
@@ -1867,13 +2502,19 @@ async function saveRecord() {
     rec.lat = currentPos.lat; rec.lng = currentPos.lng;
     if (currentPhoto) rec.photo = currentPhoto;
     rec.fileName = currentPhotoName || rec.fileName || null;
+    rec.origFileName = rec.origFileName || currentPhotoName || rec.fileName || null;  // 원본 파일명 1회 고정(역추적용)
     rec.shotTime = currentShot || rec.shotTime || rec.time;   // 촬영일시(없으면 기존값·등록시각)
+    rec.dirDeg = currentDir ? currentDir.deg : (typeof rec.dirDeg === 'number' ? rec.dirDeg : null);
+    rec.dirSrc = currentDir ? currentDir.src : (rec.dirSrc || null);
   } else {
     rec = {
       id: Date.now().toString(), projectId: currentProjectId, time: Date.now(),
       lat: currentPos.lat, lng: currentPos.lng, kind, memo, photo: currentPhoto || null,
       fileName: currentPhotoName || null,
-      shotTime: currentShot || Date.now()        // 현장 즉시등록=현재시각 / 불러오기=EXIF 촬영일시
+      origFileName: currentPhotoName || null,    // 원본 파일명(불변) — CSV 역추적용
+      shotTime: currentShot || Date.now(),       // 현장 즉시등록=현재시각 / 불러오기=EXIF 촬영일시
+      dirDeg: currentDir ? currentDir.deg : null,  // 촬영방향(있으면, §12.2[7])
+      dirSrc: currentDir ? currentDir.src : null
     };
   }
   await applyAttribution(rec);
@@ -1907,6 +2548,7 @@ document.getElementById('bulkInput').addEventListener('change', async e => {
   const center = map.getCenter();   // 위치정보 없는 사진의 임시 배치 위치(나중에 지도지정으로 수정)
   let ok = 0, noloc = 0, photoFail = 0, exifDiag = '';
   const savedPts = [];   // 저장된 좌표 모음 → 완료 후 지도를 그쪽으로 이동(점이 화면 밖이라 안 보이는 문제 해결)
+  const noLocIds = [];   // 위치없음으로 임시배치된 기록 id → 아래서 "최종 화면 중심"으로 재배치(뷰 이동 후에도 눈앞에 보이도록)
   for (let i = 0; i < files.length; i++) {
     meta.textContent = `처리 중... ${i + 1} / ${files.length}`;
     await new Promise(r => setTimeout(r, 0));   // 화면 갱신 양보(진행률이 실제로 보이도록)
@@ -1914,10 +2556,10 @@ document.getElementById('bulkInput').addEventListener('change', async e => {
 
     // 1) 위치+촬영일시: EXIF 한 번 파싱으로 함께 추출. 위치 없으면 지도 중심 임시 배치(버리지 않음)
     let lat = center.lat, lng = center.lng, locNote = '⚠위치없음(지도중심 임시·수정요망)';
-    let shot = null;
+    let shot = null, dir = null;
     try {
-      const m = await withTimeout(readPhotoMeta(f), 12000).catch(() => ({ gps: null, shot: null }));
-      shot = m.shot;
+      const m = await withTimeout(readPhotoMeta(f), 12000).catch(() => ({ gps: null, shot: null, dir: null }));
+      shot = m.shot; dir = m.dir || null;
       if (m.gps) { lat = m.gps.lat; lng = m.gps.lng; locNote = ''; }
       else { noloc++; if (!exifDiag) exifDiag = await diagnoseExif(f).catch(() => ''); }
     } catch (_) { noloc++; }
@@ -1943,18 +2585,22 @@ document.getElementById('bulkInput').addEventListener('change', async e => {
         if (near.feature) { fid = near.feature.id; famb = (near.mode === 'line') ? isAmbiguous(near.dist, near.secondDist) : false; }
       } catch (_) {}
     }
+    const recId = Date.now().toString() + '_' + i;
     try {
       await withTimeout(putRecord({
-        id: Date.now().toString() + '_' + i,
+        id: recId,
         projectId: currentProjectId,
         time: f.lastModified || Date.now(),
         shotTime: shot || f.lastModified || Date.now(),   // EXIF 촬영일시 우선
         fileName: f.name || null,
+        origFileName: f.name || null,   // 원본 파일명(불변) — CSV 역추적용
         lat: La, lng: Ln, kind, memo: locNote, photo,
-        featureId: fid, featureManual: false, featureAmbiguous: famb
+        featureId: fid, featureManual: false, featureAmbiguous: famb,
+        dirDeg: dir ? dir.deg : null, dirSrc: dir ? dir.src : null   // 촬영방향(있으면, §12.2[7])
       }), 15000);
       ok++;
       savedPts.push([La, Ln]);
+      if (locNote) noLocIds.push(recId);
     } catch (err) {
       console.warn('저장 실패:', f && f.name, err);
     }
@@ -1966,6 +2612,21 @@ document.getElementById('bulkInput').addEventListener('change', async e => {
     try {
       if (savedPts.length === 1) map.setView(savedPts[0], 16);
       else map.fitBounds(L.latLngBounds(savedPts).pad(0.2));
+    } catch (_) {}
+  }
+
+  // 위치없음 임시배치 재조정: 위치있는 사진이 섞여있으면 위 fitBounds로 지도가 이동해
+  // "예전 중심"에 찍힌 위치없음 마커가 화면 밖·엉뚱한 곳처럼 보일 수 있음
+  // → 뷰가 확정된 지금(최종 화면 중심)으로 다시 배치해 "지금 보이는 화면 가운데"에 오도록 함
+  if (noLocIds.length) {
+    try {
+      const finalCenter = map.getCenter();
+      const allRecs = await getAll();
+      for (const id of noLocIds) {
+        const r = allRecs.find(x => x.id === id);
+        if (r) { r.lat = finalCenter.lat; r.lng = finalCenter.lng; await putRecord(r); }
+      }
+      await loadMarkers();
     } catch (_) {}
   }
 
@@ -1986,10 +2647,12 @@ document.getElementById('bulkInput').addEventListener('change', async e => {
 
 // ========== 사진 확대 패널 (반화면) ==========
 let photoViewId = null;
-async function openPhotoView(id) {
+let photoViewGroupId = '';   // 겹친 목록에서 열린 경우의 그룹 id(파일명수정 시 팝업 유지용)
+async function openPhotoView(id, gid) {
   const rec = (await getAll()).find(r => r.id === id);
   if (!rec || !rec.photo) return;
   photoViewId = id;
+  photoViewGroupId = gid || '';
   document.getElementById('ppImg').src = rec.photo;
   let featName = '';
   try {
@@ -2002,10 +2665,63 @@ async function openPhotoView(id) {
   if (rec.memo) ppParts.push(rec.memo);                // ④ 메모
   document.getElementById('ppTitle').textContent = ppParts.join(' · ');
   document.getElementById('photoPanel').style.display = 'flex';
+  updatePhotoNav();
 }
 function closePhotoView() {
   document.getElementById('photoPanel').style.display = 'none';
   photoViewId = null;
+  photoViewGroupId = '';
+}
+// 겹친 지점(같은 그룹) 여러 장 넘겨보기 — 그룹 컨텍스트에서 열린 경우만 ◀▶·점 표시
+function updatePhotoNav() {
+  const prev = document.getElementById('ppPrev'), next = document.getElementById('ppNext'), dots = document.getElementById('ppDots');
+  const g = photoViewGroupId && groupData[photoViewGroupId];
+  const withPhoto = g ? g.items.filter(x => x.r.photo) : [];
+  if (!g || withPhoto.length < 2) {
+    prev.classList.remove('show'); next.classList.remove('show'); dots.classList.remove('show'); dots.innerHTML = '';
+    return;
+  }
+  prev.classList.add('show'); next.classList.add('show'); dots.classList.add('show');
+  const idx = withPhoto.findIndex(x => x.r.id === photoViewId);
+  dots.innerHTML = withPhoto.map((_, i) => `<span class="${i === idx ? 'on' : ''}"></span>`).join('');
+}
+async function stepPhotoView(dir) {
+  const g = photoViewGroupId && groupData[photoViewGroupId];
+  if (!g) return;
+  const withPhoto = g.items.filter(x => x.r.photo);
+  const idx = withPhoto.findIndex(x => x.r.id === photoViewId);
+  if (idx < 0) return;
+  const next = withPhoto[(idx + dir + withPhoto.length) % withPhoto.length];
+  await openPhotoView(next.r.id, photoViewGroupId);
+}
+// 사진 파일명 직접 수정(§12.2[3]) — 확장자는 유지, 금지문자는 _로 치환
+// id/groupId 미지정 시 현재 사진 확대 패널 대상 사용(패널 버튼). 겹친 목록 행 버튼은 (id, groupId) 전달.
+async function renamePhotoFile(id, groupId) {
+  id = id || photoViewId;
+  groupId = (groupId !== undefined) ? groupId : photoViewGroupId;
+  if (!id) return;
+  const rec = (await getAll()).find(r => r.id === id);
+  if (!rec) return;
+  const cur = rec.fileName || '';
+  const curBase = cur.replace(/\.[^.]+$/, '');           // 확장자 제외 부분
+  const ext = (cur.match(/\.[^.]+$/) || ['.jpg'])[0];    // 원래 확장자(없으면 .jpg)
+  const input = prompt('사진 파일명 수정 (확장자 제외):', curBase);
+  if (input === null) return;                            // 취소
+  const clean = input.replace(/[\\/:*?"<>|]/g, '_').trim();
+  if (!clean) { alert('파일명을 입력하세요.'); return; }
+  rec.origFileName = rec.origFileName || cur || null;   // 옛 기록도 최초 수정 전 원본 1회 고정
+  rec.fileName = clean + ext;
+  await putRecord(rec);
+  // 사진 패널이 이 기록을 보고 있으면 제목 갱신
+  if (photoViewId === id) await openPhotoView(id, photoViewGroupId);
+  // 겹친 목록 컨텍스트면 팝업만 갱신(연속작업 — 창 유지), 아니면 지도 마커 재생성
+  if (groupId && groupData[groupId]) {
+    const it = groupData[groupId].items.find(x => x.r.id === id);
+    if (it) it.r.fileName = rec.fileName;
+    groupData[groupId].marker.setPopupContent(groupListHtml(groupId));
+  } else {
+    await loadMarkers();
+  }
 }
 function editFromPhoto() {
   const id = photoViewId;
@@ -2023,6 +2739,46 @@ async function removeFromMap(id) {
   map.closePopup();
   await deleteRecord(id);
   await loadMarkers();
+}
+
+// ========== 포인트 위치 이동 (§12.2[4]) ==========
+// 별도 이동 모드: 상세뷰 '📍위치이동' → 주황 드래그 마커 생성 → '이동 저장' 확인 시 좌표만 갱신.
+// ★ 원본 사진 EXIF(shotTime·원본 파일명)는 불변 — 앱 표시좌표(lat/lng)만 이동한다.
+let moveState = null;   // { id, marker }
+function moveMarkerIcon() {
+  return L.divIcon({ className: '',
+    html: `<div style="width:22px;height:22px;border-radius:50%;background:#ff5722;border:3px solid #fff;box-shadow:0 0 0 3px rgba(255,87,34,0.45),0 2px 6px rgba(0,0,0,0.5);"></div>`,
+    iconSize: [22, 22], iconAnchor: [11, 11] });
+}
+async function startMove(id) {
+  const rec = (await getAll()).find(r => r.id === id);
+  if (!rec) return;
+  const la = Number(rec.lat), ln = Number(rec.lng);
+  if (!isFinite(la) || !isFinite(ln)) {
+    alert('이 기록은 위치 정보가 없어 이동할 수 없습니다.\n정보수정에서 위치를 먼저 지정하세요.');
+    return;
+  }
+  endMove();               // 진행 중 이동 있으면 정리
+  map.closePopup();
+  const mk = L.marker([la, ln], { draggable: true, zIndexOffset: 2000, icon: moveMarkerIcon() }).addTo(map);
+  moveState = { id, marker: mk };
+  map.setView([la, ln], Math.max(map.getZoom(), 17));
+  document.getElementById('moveBar').style.display = 'flex';
+}
+async function saveMove() {
+  if (!moveState) return;
+  const p = moveState.marker.getLatLng();
+  if (!confirm('이 지점을 새 위치로 옮길까요?\n(원본 사진의 EXIF 위치는 변경되지 않습니다.)')) return;
+  const rec = (await getAll()).find(r => r.id === moveState.id);
+  if (rec) { rec.lat = p.lat; rec.lng = p.lng; await putRecord(rec); }
+  endMove();
+  await loadMarkers();
+}
+function cancelMove() { endMove(); }
+function endMove() {
+  if (moveState) { map.removeLayer(moveState.marker); moveState = null; }
+  const bar = document.getElementById('moveBar');
+  if (bar) bar.style.display = 'none';
 }
 
 // ========== 목록 ==========
@@ -2175,6 +2931,7 @@ async function editItem(id) {
   currentPhoto = rec.photo || null;
   currentPhotoName = rec.fileName || null;   // 사진을 새로 안 바꾸면 기존 파일명·촬영일시 유지
   currentShot = rec.shotTime || null;
+  currentDir = (typeof rec.dirDeg === 'number') ? { deg: rec.dirDeg, src: rec.dirSrc || 'exif' } : null;
   // 좌표가 깨진(누락) 기록도 수정창이 열리도록 방어 — toFixed 호출 전 유효성 확인
   const la = Number(rec.lat), ln = Number(rec.lng);
   const hasLoc = isFinite(la) && isFinite(ln);
@@ -2365,9 +3122,13 @@ async function exportCSV() {
     return (a.shotTime || a.time) - (b.shotTime || b.time);
   });
   const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-  const header = ['파일명', '사업명', '군집(귀속도형)', '귀속유형', '귀속방식', '촬영일시', '종류', '위도', '경도', '갈래확인', '메모', '사진유무'];
+  // 촬영방향(있는 사진만, §12.2[7]): 스마트폰 기종에 따라 유무가 갈리고 값도 참고용 — 헤더에 명시
+  const dirText = r => (typeof r.dirDeg === 'number')
+    ? `${dirArrowText(r.dirDeg)}(${Math.round(r.dirDeg)}°${r.dirSrc === 'dji' ? ',드론' : ''})` : '';
+  const header = ['파일명(수정)', '원본파일명', '사업명', '군집(귀속도형)', '귀속유형', '귀속방식', '촬영일시', '종류', '위도', '경도', '갈래확인', '메모', '사진유무', '촬영방향(참고용·일부기종만)'];
   const rows = all.map(r => [
     q(r.fileName || r.id),
+    q(r.origFileName || r.fileName || r.id),
     q(projName),
     q(clusterName(r)),
     clusterType(r),
@@ -2377,7 +3138,8 @@ async function exportCSV() {
     r.lat, r.lng,
     r.featureAmbiguous ? '갈래확인요망' : '',
     q(r.memo || ''),
-    r.photo ? 'Y' : 'N'
+    r.photo ? 'Y' : 'N',
+    q(dirText(r))
   ]);
   const csv = '﻿' + [header, ...rows].map(r => r.join(',')).join('\r\n');
   await shareOrDownload(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), '현장조사_' + dateTag() + '.csv');
