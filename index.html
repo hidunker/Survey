@@ -325,6 +325,7 @@
   .list-item .actions { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
   .list-item .edit { color: #1565c0; font-size: 13px; padding: 6px 8px; cursor: pointer; border: 1px solid #cfe0f5; border-radius: 6px; text-align: center; }
   .list-item .del { color: #d32f2f; font-size: 13px; padding: 6px 8px; cursor: pointer; border: 1px solid #f3d2d2; border-radius: 6px; text-align: center; }
+  .list-item .rename { color: #2e7d32; font-size: 13px; padding: 6px 8px; cursor: pointer; border: 1px solid #c8e6c9; border-radius: 6px; text-align: center; white-space: nowrap; }
   .list-item input.chk { width: 22px; height: 22px; flex-shrink: 0; }
   .empty { text-align: center; color: #999; padding: 40px 0; font-size: 14px; }
   /* 귀속 하천선별 그룹 헤더 */
@@ -480,11 +481,10 @@
 <!-- 우측 기능 버튼 스택 — 아이콘 옆에 명칭(스마트폰엔 마우스오버가 없어 라벨로 안내) -->
 <div class="fab-stack">
   <div class="fab-item" onclick="openLayer()"><span class="fi-icon">🗺️</span><span class="fi-label">배경·레이어</span></div>
-  <div class="fab-item" onclick="startDrawRiver()"><span class="fi-icon">🏞️</span><span class="fi-label">선·구역</span></div>
+  <div class="fab-item" onclick="startDrawRiver()"><span class="fi-icon">🏞️</span><span class="fi-label">선·구역화</span></div>
   <div class="fab-item" onclick="openBulk()"><span class="fi-icon">🗂️</span><span class="fi-label">사진일괄</span></div>
   <div class="fab-item" onclick="openExport()"><span class="fi-icon">📤</span><span class="fi-label">내보내기·불러오기</span></div>
   <div class="fab-item" onclick="openList()"><span class="fi-icon">📋</span><span class="fi-label">목록</span></div>
-  <div class="fab-item" id="mapSelFab" onclick="toggleMapSelectMode()"><span class="fi-icon">▭</span><span class="fi-label">영역선택</span></div>
   <div class="fab-item" onclick="locateMe()"><span class="fi-icon">📍</span><span class="fi-label">현위치</span></div>
 </div>
 <button class="fab" onclick="openForm()">+ 조사 등록</button>
@@ -649,6 +649,7 @@
 
     <div class="list-toolbar">
       <button class="mini-btn" id="selToggle" onclick="toggleSelectMode()">☑️ 선택</button>
+      <button class="mini-btn" onclick="closeList(); toggleMapSelectMode();">▭ 지도에서 영역선택</button>
       <span class="meta" style="margin:0;">여러 건을 골라 사업/구분을 한 번에 바꾸거나 삭제할 수 있어요.</span>
     </div>
 
@@ -1465,11 +1466,16 @@ function recordPopupHtml(r, gid) {
     : '';
   // 그룹 컨텍스트면 삭제는 목록으로 복귀(연속작업), 단일이면 지도 유지
   const delCall = gid ? `deleteFromGroup('${gid}','${r.id}')` : `removeFromMap('${r.id}')`;
+  // 버튼 라벨이 좁은 팝업 폭에서 줄바꿈되던 문제 → white-space:nowrap + 폰트/패딩 축소로 한 줄 유지(팝업 폭은 내용에 맞춰 자동 확장)
+  const renamePopupBtn = (r.photo || r.fileName)
+    ? `<span style="flex:1;text-align:center;white-space:nowrap;color:#2e7d32;cursor:pointer;font-weight:700;font-size:12px;border:1px solid #c8e6c9;border-radius:6px;padding:5px 2px;" onclick="renamePhotoFile('${r.id}','${gid}')">📝 파일명</span>`
+    : '';
   const actions =
-    `<div style="margin-top:8px;display:flex;gap:6px;">` +
-    `<span style="flex:1;text-align:center;color:#00695c;cursor:pointer;font-weight:700;border:1px solid #b2dfdb;border-radius:6px;padding:6px 0;" onclick="startMove('${r.id}')">📍 위치이동</span>` +
-    `<span style="flex:1;text-align:center;color:#1565c0;cursor:pointer;font-weight:700;border:1px solid #cfe0f5;border-radius:6px;padding:6px 0;" onclick="editFromMap('${r.id}')">정보수정</span>` +
-    `<span style="flex:1;text-align:center;color:#d32f2f;cursor:pointer;font-weight:700;border:1px solid #f3d2d2;border-radius:6px;padding:6px 0;" onclick="${delCall}">🗑 삭제</span>` +
+    `<div style="margin-top:8px;display:flex;gap:5px;">` +
+    `<span style="flex:1;text-align:center;white-space:nowrap;color:#00695c;cursor:pointer;font-weight:700;font-size:12px;border:1px solid #b2dfdb;border-radius:6px;padding:5px 2px;" onclick="startMove('${r.id}')">📍 이동</span>` +
+    renamePopupBtn +
+    `<span style="flex:1;text-align:center;white-space:nowrap;color:#1565c0;cursor:pointer;font-weight:700;font-size:12px;border:1px solid #cfe0f5;border-radius:6px;padding:5px 2px;" onclick="editFromMap('${r.id}')">정보수정</span>` +
+    `<span style="flex:1;text-align:center;white-space:nowrap;color:#d32f2f;cursor:pointer;font-weight:700;font-size:12px;border:1px solid #f3d2d2;border-radius:6px;padding:5px 2px;" onclick="${delCall}">🗑 삭제</span>` +
     `</div>`;
   return `<b>${r.kind}</b>${riverLine}<br>${r.memo || '(메모 없음)'}<br><small>${when}</small>${fnameLine}${dirLine}${img}${actions}`;
 }
@@ -2839,9 +2845,13 @@ function listItemHTML(r) {
          </div>
        </div>`
     : `<div class="s">${esc(r.memo) || '(메모 없음)'}</div>`;
+  const renameBtn = (r.photo || r.fileName)
+    ? `<div class="rename" onclick="event.stopPropagation(); renamePhotoFile('${r.id}').then(renderList)">📝 파일명</div>`
+    : '';
   const actions = selectMode ? '' : `
     <div class="actions">
       <div class="memo" onclick="event.stopPropagation(); editMemoInline('${r.id}')" title="메모만 빠르게 수정">✎ 메모</div>
+      ${renameBtn}
       <div class="edit" onclick="event.stopPropagation(); editItem('${r.id}')">수정</div>
       <div class="del" onclick="event.stopPropagation(); removeItem('${r.id}')">삭제</div>
     </div>`;
