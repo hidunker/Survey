@@ -1991,6 +1991,7 @@ function dxfCrsCancel() {
 // 참조 레이어 통합 입력 — 확장자로 DXF/SHP/KML(KMZ)를 분기(기존 개별 함수 그대로 재사용, 병합은 진입점만)
 function uploadRefLayer(file) {
   if (!file) return;
+  closeExport();               // 부모(내보내기·데이터관리) 시트를 닫아 뒤 작업(좌표계 선택·레이어 확인)이 가리지 않게 함
   const ext = (file.name.match(/\.([^.]+)$/) || [, ''])[1].toLowerCase();
   if (ext === 'dxf') return uploadDxf(file);
   if (ext === 'zip') return uploadShp(file);
