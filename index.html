@@ -1612,6 +1612,35 @@ function distM(la1, ln1, la2, ln2) {
   const y = (la2 - la1) * d;
   return Math.sqrt(x * x + y * y) * R;
 }
+// 위경도 기준 방위각(bearingDeg, 0=북 시계방향)·거리(m) → 목적지 좌표(구면삼각법 표준식)
+function destPoint(lat, lng, bearingDeg, dist) {
+  const R = 6371000, rad = Math.PI / 180;
+  const brng = bearingDeg * rad, lat1 = lat * rad, lng1 = lng * rad;
+  const lat2 = Math.asin(Math.sin(lat1) * Math.cos(dist / R) + Math.cos(lat1) * Math.sin(dist / R) * Math.cos(brng));
+  const lng2 = lng1 + Math.atan2(Math.sin(brng) * Math.sin(dist / R) * Math.cos(lat1), Math.cos(dist / R) - Math.sin(lat1) * Math.sin(lat2));
+  return [lat2 / rad, ((lng2 / rad) + 540) % 360 - 180];
+}
+// 촬영방향 부채꼴(사진 시야 방향 표시, 네이버지도 "집" 마커 스타일 참고) — 참고용 값이라 반투명·얇은 테두리
+let dirFanLayer = null;
+function dirFanPoints(lat, lng, dirDeg, radius = 22, halfAngle = 32, steps = 10) {
+  const pts = [[lat, lng]];
+  for (let i = 0; i <= steps; i++) {
+    const ang = dirDeg - halfAngle + (2 * halfAngle) * (i / steps);
+    pts.push(destPoint(lat, lng, ang, radius));
+  }
+  pts.push([lat, lng]);
+  return pts;
+}
+function showDirFan(r) {
+  clearDirFan();
+  if (!r || typeof r.dirDeg !== 'number' || !isFinite(r.lat) || !isFinite(r.lng)) return;   // 방향 정보 없으면 조용히 생략
+  dirFanLayer = L.polygon(dirFanPoints(r.lat, r.lng, r.dirDeg), {
+    color: '#7c4dff', weight: 1, fillColor: '#7c4dff', fillOpacity: 0.35, interactive: false
+  }).addTo(map);
+}
+function clearDirFan() {
+  if (dirFanLayer) { map.removeLayer(dirFanLayer); dirFanLayer = null; }
+}
 // 단일 조사 팝업 HTML (마커 직접 / 겹침목록에서 선택 시 공용)
 function recordPopupHtml(r, gid) {
   gid = gid || '';
@@ -1681,15 +1710,18 @@ function showGroupRecord(id, rid) {
   const item = g.items.find(x => x.r.id === rid); if (!item) return;
   const back = `<div style="color:#1565c0;cursor:pointer;font-weight:700;font-size:13px;margin-bottom:6px;" onclick="showGroupList('${id}')">← 목록 (${g.items.length}장)</div>`;
   g.marker.setPopupContent(back + recordPopupHtml(item.r, id));
+  showDirFan(item.r);   // 방향 정보 있는 사진이면 부채꼴 표시(없으면 조용히 생략)
 }
 function showGroupList(id) {
   const g = groupData[id]; if (!g) return;
   g.marker.setPopupContent(groupListHtml(id));
+  clearDirFan();   // 목록으로 돌아가면(특정 사진 상세가 아니므로) 부채꼴 숨김
 }
 // 겹친 목록/상세에서 삭제 — 팝업 유지(연속작업). 1건 이하로 줄면 그룹 해제 후 재구성.
 async function deleteFromGroup(id, rid) {
   if (!confirm('이 조사를 삭제할까요?')) return;
   await deleteRecord(rid);
+  clearDirFan();
   const g = groupData[id];
   if (g && g.items.length > 2) {
     g.items = g.items.filter(x => x.r.id !== rid);
@@ -1735,6 +1767,8 @@ async function loadMarkers() {
       m._groupCount = 1;
       m._recordId = anchor.r.id;   // 지도 드래그 다중선택(§12.2[9])에서 조회용
       m.bindPopup(recordPopupHtml(anchor.r));
+      m.on('popupopen', () => showDirFan(anchor.r));   // 방향 정보 있으면 클릭 시 부채꼴 표시(없으면 조용히 생략)
+      m.on('popupclose', () => clearDirFan());
       recordMarkers.push(m);
     } else {
       const id = 'g' + (gseq++);
@@ -1744,7 +1778,7 @@ async function loadMarkers() {
       groupData[id] = { items: g.items, marker: m };
       m.bindPopup(groupListHtml(id));
       // 닫았다 다시 열면(또는 마커 재탭) 마지막 본 사진 상세가 아니라 항상 '목록'부터 보이게 리셋
-      m.on('popupclose', () => { if (groupData[id]) m.setPopupContent(groupListHtml(id)); });
+      m.on('popupclose', () => { if (groupData[id]) m.setPopupContent(groupListHtml(id)); clearDirFan(); });
       recordMarkers.push(m);
     }
   });
