@@ -184,6 +184,21 @@
     max-width: 64px; word-break: keep-all;
   }
   .fab-item:active .fi-icon { background: #eef0f3; }
+  /* 좌측 단독 버튼(조사경로 트래킹) — 우측 fab-stack과 대칭 위치, 항목 1개 */
+  .fab-stack-left {
+    position: fixed; left: 12px; bottom: 84px; z-index: 1000;
+    display: flex; flex-direction: column; gap: 15px; align-items: flex-start;
+  }
+  .fab-item.tracking .fi-icon { background: #d32f2f; color: #fff; }
+  /* 트래킹 진행 상태 바 */
+  #trackBar {
+    position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%); z-index: 1900;
+    display: none; gap: 10px; align-items: center;
+    background: rgba(211,47,47,0.95); color: #fff; padding: 8px 12px; border-radius: 12px;
+    box-shadow: 0 3px 12px rgba(0,0,0,0.3);
+  }
+  #trackBar .tcount { font-size: 13px; font-weight: 700; white-space: nowrap; }
+  #trackBar .t-stop { border: none; border-radius: 8px; padding: 9px 13px; font-size: 13px; font-weight: 700; cursor: pointer; background: #fff; color: #d32f2f; }
   /* 레이어 시트 행(배경지도 라디오 / 오버레이·참조레이어 체크박스) */
   .lay-row {
     display: flex; align-items: center; gap: 10px; padding: 11px 4px;
@@ -501,6 +516,18 @@
   <div class="fab-item" onclick="openList()"><span class="fi-icon">📋</span><span class="fi-label">목록</span></div>
   <div class="fab-item" onclick="locateMe()"><span class="fi-icon">📍</span><span class="fi-label">현위치</span></div>
 </div>
+
+<!-- 좌측 단독 버튼: 조사경로(트래킹라인) -->
+<div class="fab-stack-left">
+  <div class="fab-item" id="trackFabBtn" onclick="toggleTracking()"><span class="fi-icon">🧭</span><span class="fi-label">조사경로</span></div>
+</div>
+
+<!-- 트래킹 중 상태 표시 바(거리·경과시간 + 종료) -->
+<div id="trackBar">
+  <span class="tcount" id="trackInfo">0.00km · 00:00:00</span>
+  <button class="t-stop" onclick="stopTracking()">트래킹 종료</button>
+</div>
+
 <button class="fab" onclick="openForm()">+ 조사 등록</button>
 
 <!-- 사진 확대 패널 (반화면, 모달 아님) -->
@@ -889,7 +916,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ========== 공통 상수 ==========
-const BUILD = '2026-07-01f (촬영방향 표시 — EXIF GPSImgDirection/DJI XMP, 참고용)';
+const BUILD = '2026-07-06c (조사경로 트래킹 — 목록에도 표시, 이름수정/KMZ내보내기/삭제)';
 console.log('현장조사 build:', BUILD);
 const KINDS = ['하천', '소하천', '댐지점', '구조물', '불법시설물', '기타'];
 function kindOptions(sel) {
@@ -2002,9 +2029,9 @@ map.getContainer().addEventListener('touchend', onMapSelEnd);
 
 // ========== 선형 도형(하천선·도로선 등) 표시 ==========
 // 선형은 하천에 한정되지 않음 — 도로작업이면 도로선이 될 수 있음(category로 구분).
-function featIcon(cat)     { return cat === '도로' ? '🛣️' : cat === '기타' ? '📌' : '🏞️'; }
-function featTypeName(cat) { return cat === '도로' ? '도로선' : cat === '기타' ? '선형' : '하천선'; }
-function featColor(cat)    { return cat === '도로' ? '#fb8c00' : cat === '기타' ? '#8e24aa' : '#1e88e5'; }
+function featIcon(cat)     { return cat === '도로' ? '🛣️' : cat === '기타' ? '📌' : cat === '조사경로' ? '🧭' : '🏞️'; }
+function featTypeName(cat) { return cat === '도로' ? '도로선' : cat === '기타' ? '선형' : cat === '조사경로' ? '조사경로' : '하천선'; }
+function featColor(cat)    { return cat === '도로' ? '#fb8c00' : cat === '기타' ? '#8e24aa' : cat === '조사경로' ? '#d32f2f' : '#1e88e5'; }
 
 let featureLayers = [];
 async function loadFeatures() {
@@ -2062,8 +2089,45 @@ async function loadFeatures() {
       );
       pg.on('click', () => pg.openPopup());
       featureLayers.push(pg);
+    } else if (f.type === 'track' && Array.isArray(f.coords) && f.coords.length >= 2) {
+      // 조사경로(트래킹라인) — 귀속 대상 아님(nearestLineFeature는 type:'line'만 봄), 점선으로 구분 표시
+      const color = f.color || featColor('조사경로');
+      if (isSatellite) {
+        const halo = L.polyline(f.coords, { color: '#ffffff', weight: 7, opacity: 0.55, dashArray: '2,10', lineCap: 'round', interactive: false }).addTo(map);
+        featureLayers.push(halo);
+      }
+      const tl = L.polyline(f.coords, { color, weight: 4, opacity: 0.95, dashArray: '2,10', lineCap: 'round' }).addTo(map);
+      const km = ((f.distanceM || 0) / 1000).toFixed(2);
+      tl.bindPopup(
+        `<b>🧭 ${esc(f.name)}</b><br>` +
+        `<small>조사경로 · ${km}km · ${f.coords.length}점</small><br>` +
+        `<span style="color:#1565c0;cursor:pointer;font-weight:700;" onclick="renameFeature('${f.id}')">✏️ 이름 수정</span>` +
+        ` &nbsp;·&nbsp; ` +
+        `<span style="color:#2e7d32;cursor:pointer;font-weight:700;" onclick="exportTrackKmz('${f.id}')">⬇️ KMZ 내보내기</span>` +
+        ` &nbsp;·&nbsp; ` +
+        `<span style="color:#d32f2f;cursor:pointer;font-weight:700;" onclick="removeFeature('${f.id}')">🗑 삭제</span>`
+      );
+      tl.on('click', () => tl.openPopup());
+      featureLayers.push(tl);
     }
   });
+}
+// 조사경로(트래킹라인) → KMZ 내보내기 (WGS84 그대로라 좌표계 변환 불요, QGIS/ArcGIS에서 바로 인식)
+async function exportTrackKmz(id) {
+  const f = (await getAllFeatures()).find(x => x.id === id);
+  if (!f || !Array.isArray(f.coords) || f.coords.length < 2) { alert('내보낼 조사경로가 없습니다.'); return; }
+  await ensureJSZip();
+  const coordText = f.coords.map(p => `${p[1]},${p[0]},0`).join(' ');
+  const kml = '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<kml xmlns="http://www.opengis.net/kml/2.2"><Document>\n' +
+    `<Placemark><name>${esc(f.name)}</name>\n` +
+    `<LineString><tessellate>1</tessellate><coordinates>${coordText}</coordinates></LineString>\n` +
+    '</Placemark></Document></kml>';
+  const zip = new JSZip();
+  zip.file('doc.kml', kml);
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const safe = (f.name || '조사경로').replace(/[\\/:*?"<>|]/g, '_');
+  await shareOrDownload(blob, safe + '.kmz');
 }
 // 선형 유형 순환: 하천 → 도로 → 기타 → 하천 (색도 함께 변경, 사용자 지정색이 기본색일 때만)
 async function cycleFeatureCategory(id) {
@@ -2476,6 +2540,150 @@ function locateMe() {
     },
     msg => alert('위치를 가져올 수 없습니다.\n\n📱 삼성 인터넷: 설정 → 사이트 권한 → 위치 → 이 사이트 허용\n🔵 크롬: 주소창 자물쇠 → 위치 → 허용\n\n' + msg)
   );
+}
+
+// ========== 조사경로(트래킹라인) ==========
+// ⚠ 순수 웹앱 한계: 브라우저 탭이 백그라운드(다른 앱 전환/화면잠금)로 가면 OS가 GPS 수집을 정지시킴.
+//   Wake Lock API로 "화면 꺼짐"만 방지(지원 브라우저 한정) — "다른 앱으로 나가면 끊김"은 근본 해결 불가(네이티브 앱만 가능, 매뉴얼 고지 대상).
+let trackWatchId = null;
+let trackPoints = [];     // [{lat,lng,t}]
+let trackLine = null;     // 트래킹 중 임시 표시 폴리라인(저장 전)
+let trackWakeLock = null;
+let trackStartTime = null;
+let trackTimerId = null;
+const TRACK_MIN_MOVE_M = 5;   // GPS 잡음 제거용 최소 이동거리(미만은 점 추가 안 함)
+
+function isTracking() { return trackWatchId !== null; }
+
+// 임시 저장(draft) — 트래킹 도중 탭이 백그라운드로 가거나 예기치 않게 꺼져도
+// "그 시점까지"는 IndexedDB에 남도록, 점이 찍힐 때마다·화면이 가려질 때마다 덮어써 둔다.
+// 정식 저장(type:'track')과 구분되는 임시 상태(type:'track_draft')라 지도엔 안 그려지고 귀속 로직에도 안 잡힘.
+function trackDraftId(pid) { return 'trkdraft_' + pid; }
+async function getTrackDraft(pid) {
+  const f = await getAllFeatures();
+  return f.find(x => x.id === trackDraftId(pid) && x.type === 'track_draft') || null;
+}
+async function saveTrackDraft() {
+  if (!currentProjectId || trackPoints.length < 2) return;
+  await putFeature({ id: trackDraftId(currentProjectId), projectId: currentProjectId, type: 'track_draft', points: trackPoints, updatedAt: Date.now() });
+}
+async function deleteTrackDraft(pid) {
+  if (pid) await deleteFeature(trackDraftId(pid));
+}
+// 탭이 백그라운드로 전환되는 순간(다른 앱 전환 등) 마지막으로 한 번 더 저장 — 완벽한 보장은 아니지만 최선.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && isTracking()) saveTrackDraft();
+});
+window.addEventListener('pagehide', () => { if (isTracking()) saveTrackDraft(); });
+
+async function toggleTracking() {
+  if (isTracking()) await stopTracking(); else await startTracking();
+}
+
+async function startTracking() {
+  if (!currentProjectId) { alert('먼저 사업을 선택/생성해 주세요.'); return; }
+  if (!navigator.geolocation) { alert('이 기기/브라우저는 위치를 지원하지 않습니다.'); return; }
+
+  // 이전에 비정상 종료(화면꺼짐·다른 앱 전환·브라우저 종료 등)된 트래킹이 남아있으면 먼저 복구 여부를 물음
+  const draft = await getTrackDraft(currentProjectId);
+  if (draft && Array.isArray(draft.points) && draft.points.length >= 2) {
+    const when = new Date(draft.updatedAt).toLocaleString();
+    const keep = confirm(
+      `이전에 끝맺지 못한 트래킹 기록이 있습니다 (${draft.points.length}점 · ${when} 까지 기록됨).\n\n` +
+      '[확인] = 그 기록을 저장(이름 입력)\n[취소] = 버리고 새로 시작'
+    );
+    await deleteTrackDraft(currentProjectId);
+    if (keep) { trackPoints = draft.points.slice(); await saveTrackAsFeature(); }
+    return;   // 이번 클릭은 복구 처리로 소비 — 새 트래킹은 다시 눌러서 시작
+  }
+
+  if (!sessionStorage.getItem('track_notified')) {
+    sessionStorage.setItem('track_notified', '1');
+    alert('조사경로 트래킹 안내\n\n' +
+      '• 트래킹 중에는 화면을 켠 채로 이 앱 탭을 벗어나지 마세요.\n' +
+      '• 다른 앱으로 전환하거나 화면이 꺼지면 브라우저가 위치 수집을 멈출 수 있습니다(웹의 한계).\n' +
+      '• 그 시점까지 이동한 경로는 자동으로 임시 저장되며, 다음에 트래킹 버튼을 누르면 이어서 종료 처리할 수 있습니다.');
+  }
+
+  trackPoints = [];
+  trackStartTime = Date.now();
+  const btn = document.getElementById('trackFabBtn');
+  btn.classList.add('tracking');
+  btn.querySelector('.fi-label').textContent = '트래킹중';
+  document.getElementById('trackBar').style.display = 'flex';
+  updateTrackInfo();
+  trackTimerId = setInterval(updateTrackInfo, 1000);
+  try {
+    if ('wakeLock' in navigator) {
+      trackWakeLock = await navigator.wakeLock.request('screen');
+      trackWakeLock.addEventListener('release', () => { trackWakeLock = null; });
+    }
+  } catch (_) { trackWakeLock = null; }   // 미지원/거부돼도 트래킹 자체는 계속 진행
+  trackWatchId = navigator.geolocation.watchPosition(
+    onTrackPosition,
+    () => { /* 일시 오류(터널 등)는 무시 — watchPosition이 알아서 재시도 */ },
+    { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 }
+  );
+}
+
+function onTrackPosition(pos) {
+  const lat = pos.coords.latitude, lng = pos.coords.longitude;
+  const last = trackPoints[trackPoints.length - 1];
+  if (last && distM(last.lat, last.lng, lat, lng) < TRACK_MIN_MOVE_M) return;
+  trackPoints.push({ lat, lng, t: Date.now() });
+  if (trackLine) map.removeLayer(trackLine);
+  trackLine = L.polyline(trackPoints.map(p => [p.lat, p.lng]),
+    { color: '#d32f2f', weight: 4, dashArray: '2,8', lineCap: 'round' }).addTo(map);
+  updateTrackInfo();
+  saveTrackDraft();   // 점이 찍힐 때마다 임시 저장(다음 점까지 못 가고 끊겨도 이 시점까진 보존)
+}
+
+function trackDistanceM() {
+  let d = 0;
+  for (let i = 1; i < trackPoints.length; i++)
+    d += distM(trackPoints[i - 1].lat, trackPoints[i - 1].lng, trackPoints[i].lat, trackPoints[i].lng);
+  return d;
+}
+function updateTrackInfo() {
+  const el = document.getElementById('trackInfo');
+  if (!el) return;
+  const sec = Math.floor((Date.now() - trackStartTime) / 1000);
+  const hh = String(Math.floor(sec / 3600)).padStart(2, '0');
+  const mm = String(Math.floor((sec % 3600) / 60)).padStart(2, '0');
+  const ss = String(sec % 60).padStart(2, '0');
+  el.textContent = (trackDistanceM() / 1000).toFixed(2) + 'km · ' + hh + ':' + mm + ':' + ss;
+}
+
+async function stopTracking() {
+  if (trackWatchId !== null) { navigator.geolocation.clearWatch(trackWatchId); trackWatchId = null; }
+  if (trackTimerId) { clearInterval(trackTimerId); trackTimerId = null; }
+  if (trackWakeLock) { try { await trackWakeLock.release(); } catch (_) {} trackWakeLock = null; }
+  const btn = document.getElementById('trackFabBtn');
+  btn.classList.remove('tracking');
+  btn.querySelector('.fi-label').textContent = '조사경로';
+  document.getElementById('trackBar').style.display = 'none';
+  if (trackLine) { map.removeLayer(trackLine); trackLine = null; }
+  await deleteTrackDraft(currentProjectId);   // 정상 종료 흐름 진입 — 임시본은 정리(최종본은 아래서 저장)
+  await saveTrackAsFeature();
+}
+// trackPoints를 정식 조사경로(features, type:'track')로 저장 — 정상 종료·이전 draft 복구 양쪽에서 공용
+async function saveTrackAsFeature() {
+  if (trackPoints.length < 2) { trackPoints = []; alert('이동 거리가 너무 짧아 저장하지 않았습니다.'); return; }
+  const name = prompt('조사경로 이름을 입력하세요', '조사경로 ' + dateTag());
+  if (name === null) { trackPoints = []; return; }   // 취소 → 저장 안 함
+  const f = {
+    id: 'trk' + Date.now(),
+    projectId: currentProjectId,
+    type: 'track',
+    category: '조사경로',
+    name: name.trim() || ('조사경로 ' + dateTag()),
+    coords: trackPoints.map(p => [p.lat, p.lng]),
+    createdAt: Date.now(),
+    distanceM: Math.round(trackDistanceM())
+  };
+  await putFeature(f);
+  trackPoints = [];
+  await loadFeatures();
 }
 
 // ========== 등록 폼 ==========
@@ -3200,13 +3408,15 @@ let listCache = [];
 let listFilterFeatureId = null;   // 하천선 귀속 필터(특정 하천선의 조사만 표시)
 let featNameById = {};            // 목록 행에 귀속 선형명 표시용
 let featCatById = {};             // 목록 행/그룹 헤더 아이콘(하천/도로/기타)용
+let listTracksCache = [];         // 목록 상단 "조사경로" 섹션(조사 레코드와 무관한 트래킹라인)
 
 async function openList() {
   memoEditId = null;
   let recs = (await getAll()).filter(r => r.projectId === currentProjectId);
   featNameById = {}; featCatById = {};
-  (await getAllFeatures()).filter(f => f.projectId === currentProjectId)
-    .forEach(f => { featNameById[f.id] = f.name; featCatById[f.id] = f.category || '하천'; });
+  const allFeats = (await getAllFeatures()).filter(f => f.projectId === currentProjectId);
+  allFeats.forEach(f => { featNameById[f.id] = f.name; featCatById[f.id] = f.category || '하천'; });
+  listTracksCache = allFeats.filter(f => f.type === 'track');   // 조사경로(트래킹라인) — 조사 목록과 별도 섹션으로 표시
   const bar = document.getElementById('listFilterBar');
   if (listFilterFeatureId) {
     const f = (await getAllFeatures()).find(x => x.id === listFilterFeatureId);
@@ -3279,10 +3489,25 @@ function listItemHTML(r) {
   </div>`;
 }
 
+// 목록 상단 "조사경로" 섹션 행 — 조사 건수 집계가 아니라 거리·점수 표시, 이름수정/KMZ내보내기/삭제
+function trackListItemHTML(f) {
+  const km = ((f.distanceM || 0) / 1000).toFixed(2);
+  return `<div class="group-head" style="background:#fdeaea;"><span>🧭 ${esc(f.name)}</span>` +
+    `<span style="display:flex;align-items:center;gap:6px;">` +
+    `<span class="gcnt">${km}km · ${(f.coords || []).length}점</span>` +
+    `<span style="color:#1565c0;cursor:pointer;font-weight:700;font-size:11px;border:1px solid #cfe0f5;border-radius:5px;padding:3px 6px;white-space:nowrap;" onclick="renameFeature('${f.id}').then(renderList)">이름수정</span>` +
+    `<span style="color:#2e7d32;cursor:pointer;font-weight:700;font-size:11px;border:1px solid #c8e6c9;border-radius:5px;padding:3px 6px;white-space:nowrap;" onclick="exportTrackKmz('${f.id}')">⬇️KMZ</span>` +
+    `<span style="color:#d32f2f;cursor:pointer;font-weight:700;font-size:11px;border:1px solid #f3d2d2;border-radius:5px;padding:3px 6px;white-space:nowrap;" onclick="deleteFeatureFromList('${f.id}')">삭제</span>` +
+    `</span></div>`;
+}
 function renderList() {
   const body = document.getElementById('listBody');
+  const trackHtml = listTracksCache.length
+    ? `<div style="padding:6px 4px 2px;color:#888;font-size:11px;font-weight:700;">🧭 조사경로 (${listTracksCache.length})</div>` +
+      listTracksCache.map(trackListItemHTML).join('')
+    : '';
   if (listCache.length === 0) {
-    body.innerHTML = '<div class="empty">등록된 조사가 없습니다.</div>';
+    body.innerHTML = trackHtml + '<div class="empty">등록된 조사가 없습니다.</div>';
     updateSelCount();
     return;
   }
@@ -3313,7 +3538,7 @@ function renderList() {
     }
     html += arr.map(listItemHTML).join('');
   }
-  body.innerHTML = html;
+  body.innerHTML = trackHtml + html;
   updateSelCount();
 }
 
@@ -3685,7 +3910,7 @@ async function exportJSONProject() {
   const pid = currentProjectId;
   const projs = (await getAllProjects()).filter(p => p.id === pid);
   const all = (await getAll()).filter(r => r.projectId === pid);
-  const feats = (await getAllFeatures()).filter(f => f.projectId === pid);
+  const feats = (await getAllFeatures()).filter(f => f.projectId === pid && f.type !== 'track_draft');
   const ovs = (await getAllOverlays()).filter(o => o.projectId === pid);
   if (!all.length && !feats.length && !ovs.length) { alert('현재 사업에 내보낼 데이터가 없습니다.'); return; }
   const pname = (projs[0]?.name || '사업').replace(/[\\/:*?"<>|]/g, '_');
