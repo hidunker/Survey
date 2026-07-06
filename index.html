@@ -2693,17 +2693,30 @@ async function stopTracking() {
   await deleteTrackDraft(currentProjectId);   // 정상 종료 흐름 진입 — 임시본은 정리(최종본은 아래서 저장)
   await saveTrackAsFeature();
 }
+// 같은 사업 안에서 같은 종류(type) 도형끼리 이름이 겹치면 " (1)", " (2)"…를 붙여 구분되게 함(excludeId는 자기 자신 제외용, 이름수정 시 사용)
+async function uniqueFeatureName(base, type, projectId, excludeId) {
+  const names = new Set(
+    (await getAllFeatures())
+      .filter(f => f.projectId === projectId && f.type === type && f.id !== excludeId)
+      .map(f => f.name)
+  );
+  if (!names.has(base)) return base;
+  let n = 1;
+  while (names.has(`${base} (${n})`)) n++;
+  return `${base} (${n})`;
+}
 // trackPoints를 정식 조사경로(features, type:'track')로 저장 — 정상 종료·이전 draft 복구 양쪽에서 공용
 async function saveTrackAsFeature() {
   if (trackPoints.length < 2) { trackPoints = []; alert('이동 거리가 너무 짧아 저장하지 않았습니다.'); return; }
   const name = prompt('조사경로 이름을 입력하세요', '조사경로 ' + dateTag());
   if (name === null) { trackPoints = []; return; }   // 취소 → 저장 안 함
+  const baseName = name.trim() || ('조사경로 ' + dateTag());
   const f = {
     id: 'trk' + Date.now(),
     projectId: currentProjectId,
     type: 'track',
     category: '조사경로',
-    name: name.trim() || ('조사경로 ' + dateTag()),
+    name: await uniqueFeatureName(baseName, 'track', currentProjectId),
     coords: trackPoints.map(p => [p.lat, p.lng]),
     createdAt: Date.now(),
     distanceM: Math.round(trackDistanceM())
@@ -3523,6 +3536,7 @@ function trackListItemHTML(f) {
     `<span style="display:flex;align-items:center;gap:6px;">` +
     `<span class="gcnt">${km}km · ${(f.coords || []).length}점</span>` +
     `<span style="color:#1565c0;cursor:pointer;font-weight:700;font-size:11px;border:1px solid #cfe0f5;border-radius:5px;padding:3px 6px;white-space:nowrap;" onclick="renameFeature('${f.id}').then(renderList)">이름수정</span>` +
+    `<span style="color:#1565c0;cursor:pointer;font-weight:700;font-size:11px;border:1px solid #cfe0f5;border-radius:5px;padding:3px 6px;white-space:nowrap;" onclick="moveFeatureFromList('${f.id}')">이동</span>` +
     `<span style="color:#2e7d32;cursor:pointer;font-weight:700;font-size:11px;border:1px solid #c8e6c9;border-radius:5px;padding:3px 6px;white-space:nowrap;" onclick="exportTrackKmz('${f.id}')">⬇️KMZ</span>` +
     `<span style="color:#d32f2f;cursor:pointer;font-weight:700;font-size:11px;border:1px solid #f3d2d2;border-radius:5px;padding:3px 6px;white-space:nowrap;" onclick="deleteFeatureFromList('${f.id}')">삭제</span>` +
     `</span></div>`;
@@ -3687,7 +3701,9 @@ async function moveFeatureFromList(featureId) {
   document.getElementById('reassignProject').innerHTML = projects
     .map(p => `<option value="${p.id}" ${p.id === currentProjectId ? 'selected' : ''}>${p.name}</option>`)
     .join('');
-  document.getElementById('reassignCount').textContent = `「${feat.name}」 도형과 귀속 조사 ${cnt}건을 다른 사업으로 이동/복사합니다.`;
+  document.getElementById('reassignCount').textContent = feat.type === 'track'
+    ? `「${feat.name}」 조사경로(${((feat.distanceM || 0) / 1000).toFixed(2)}km)를 다른 사업으로 이동/복사합니다.`
+    : `「${feat.name}」 도형과 귀속 조사 ${cnt}건을 다른 사업으로 이동/복사합니다.`;
   document.getElementById('reassignOverlay').classList.add('show');
 }
 function closeReassign() { document.getElementById('reassignOverlay').classList.remove('show'); reassignFeatureId = null; }
@@ -3809,7 +3825,9 @@ async function applyReassignFeature() {
   renderProjectSelect(await getAllProjects());
   await loadMarkers();
   await openList();
-  alert(`「${feat.name}」 ${delOrig ? '이동' : '복사'} 완료 — 조사 ${recs.length}건도 함께 ${delOrig ? '이동' : '복사'}되었습니다.`);
+  alert(recs.length
+    ? `「${feat.name}」 ${delOrig ? '이동' : '복사'} 완료 — 조사 ${recs.length}건도 함께 ${delOrig ? '이동' : '복사'}되었습니다.`
+    : `「${feat.name}」 ${delOrig ? '이동' : '복사'} 완료.`);
 }
 
 // 구분 변경
