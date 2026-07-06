@@ -916,7 +916,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ========== 공통 상수 ==========
-const BUILD = '2026-07-06c (조사경로 트래킹 — 목록에도 표시, 이름수정/KMZ내보내기/삭제)';
+const BUILD = '2026-07-06d (조사경로 트래킹 — 위치권한 거부 시 즉시 안내, GPS신호 장기미수신 경고)';
 console.log('현장조사 build:', BUILD);
 const KINDS = ['하천', '소하천', '댐지점', '구조물', '불법시설물', '기타'];
 function kindOptions(sel) {
@@ -2551,6 +2551,7 @@ let trackLine = null;     // 트래킹 중 임시 표시 폴리라인(저장 전
 let trackWakeLock = null;
 let trackStartTime = null;
 let trackTimerId = null;
+let trackGpsErrorStreak = 0;   // watchPosition 연속 오류 횟수(권한거부 즉시감지·장기실패 경고용)
 const TRACK_MIN_MOVE_M = 5;   // GPS 잡음 제거용 최소 이동거리(미만은 점 추가 안 함)
 
 function isTracking() { return trackWatchId !== null; }
@@ -2619,9 +2620,21 @@ async function startTracking() {
       trackWakeLock.addEventListener('release', () => { trackWakeLock = null; });
     }
   } catch (_) { trackWakeLock = null; }   // 미지원/거부돼도 트래킹 자체는 계속 진행
+  trackGpsErrorStreak = 0;
   trackWatchId = navigator.geolocation.watchPosition(
-    onTrackPosition,
-    () => { /* 일시 오류(터널 등)는 무시 — watchPosition이 알아서 재시도 */ },
+    pos => { trackGpsErrorStreak = 0; onTrackPosition(pos); },
+    err => {
+      if (err && err.code === 1) {   // PERMISSION_DENIED — 재시도해도 절대 안 되므로 즉시 중단하고 알림
+        abortTracking('위치 권한이 없어 트래킹을 진행할 수 없습니다.\n\n📱 삼성 인터넷: 설정 → 사이트 권한 → 위치 → 이 사이트 허용\n🔵 크롬: 주소창 자물쇠 → 위치 → 허용\n\n허용한 뒤 🧭 버튼을 다시 눌러주세요.');
+        return;
+      }
+      // POSITION_UNAVAILABLE/TIMEOUT(터널 등 일시적 상황)은 watchPosition이 알아서 재시도하므로 계속 진행하되,
+      // 계속 실패하면(위치서비스 자체가 꺼져있을 가능성) 한 번은 알려줌 — "타이머만 돌고 실제로는 안 찍히는" 상태를 방치하지 않기 위함.
+      trackGpsErrorStreak++;
+      if (trackGpsErrorStreak === 5) {
+        alert('위치 신호를 계속 받지 못하고 있습니다(경과시간은 흘러도 이동 거리는 0으로 보일 수 있음).\n\n휴대폰의 위치(GPS) 서비스가 켜져 있는지 확인해 주세요. 트래킹은 계속 시도합니다.');
+      }
+    },
     { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 }
   );
 }
@@ -2654,6 +2667,20 @@ function updateTrackInfo() {
   el.textContent = (trackDistanceM() / 1000).toFixed(2) + 'km · ' + hh + ':' + mm + ':' + ss;
 }
 
+// 위치 권한 거부 등 "재시도해도 절대 안 되는" 오류로 트래킹을 강제 중단 — 저장 없이 화면만 원상복구 + 사유 안내
+async function abortTracking(msg) {
+  if (trackWatchId !== null) { navigator.geolocation.clearWatch(trackWatchId); trackWatchId = null; }
+  if (trackTimerId) { clearInterval(trackTimerId); trackTimerId = null; }
+  if (trackWakeLock) { try { await trackWakeLock.release(); } catch (_) {} trackWakeLock = null; }
+  const btn = document.getElementById('trackFabBtn');
+  btn.classList.remove('tracking');
+  btn.querySelector('.fi-label').textContent = '조사경로';
+  document.getElementById('trackBar').style.display = 'none';
+  if (trackLine) { map.removeLayer(trackLine); trackLine = null; }
+  await deleteTrackDraft(currentProjectId);
+  trackPoints = [];
+  alert(msg);
+}
 async function stopTracking() {
   if (trackWatchId !== null) { navigator.geolocation.clearWatch(trackWatchId); trackWatchId = null; }
   if (trackTimerId) { clearInterval(trackTimerId); trackTimerId = null; }
