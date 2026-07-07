@@ -420,7 +420,8 @@
   #photoPanel .pp-bar button { white-space: nowrap; flex-shrink: 0; }
   #photoPanel .pp-close { background: #3a3a3a; color: #fff; }
   #photoPanel .pp-body { position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-  #photoPanel .pp-body img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  /* 핀치 줌(§12.2 후속) — touch-action:none으로 브라우저 기본 확대/스크롤을 막고 transform으로 직접 확대·이동 처리 */
+  #photoPanel .pp-body img { max-width: 100%; max-height: 100%; object-fit: contain; touch-action: none; }
   /* 겹친 지점 여러 장 넘겨보기(◀▶) — 그룹 컨텍스트에서만 표시 */
   #photoPanel .pp-nav {
     display: none; position: absolute; top: 50%; transform: translateY(-50%);
@@ -452,6 +453,25 @@
   }
   #dxfCrsOverlay .dxf-el small, #dxfCrsOverlay .dxf-or small { font-weight: 400; color: #888; font-size: 11px; }
   #dxfCrsOverlay .dxf-el.on, #dxfCrsOverlay .dxf-or.on { border-color: #1565c0; background: #e8f1fc; color: #0d47a1; }
+
+  /* 지도 길게누르기(모바일)/우클릭(PC) 미니메뉴(§12.2 후속) — [여기 주소보기]/[메모등록 or 정보수정] */
+  #lpMenu {
+    display: none; position: fixed; z-index: 2200; background: #262626; border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.45); overflow: hidden; min-width: 150px;
+  }
+  #lpMenu button {
+    display: block; width: 100%; border: 0; background: none; color: #fff; text-align: left;
+    padding: 12px 16px; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  #lpMenu button:active { background: #3a3a3a; }
+  #lpMenu button + button { border-top: 1px solid #3a3a3a; }
+  /* 주소보기 팝업 내부(Leaflet 팝업에 삽입) */
+  .addr-popup-body { font-size: 13px; min-width: 160px; }
+  .addr-popup-text { margin-bottom: 8px; line-height: 1.4; word-break: break-all; }
+  .addr-copy-btn {
+    border: 0; border-radius: 7px; padding: 6px 10px; font-size: 12px; font-weight: 700;
+    background: #1565c0; color: #fff; cursor: pointer;
+  }
 </style>
 </head>
 <body>
@@ -591,6 +611,12 @@
   <span id="moveMsg">📍 위치 이동 — 주황 마커를 끌어 옮긴 뒤 저장하세요</span>
   <button class="mb-save" onclick="saveMove()">이동 저장</button>
   <button class="mb-cancel" onclick="cancelMove()">취소</button>
+</div>
+
+<!-- 지도 길게누르기(모바일)/우클릭(PC) 미니메뉴(§12.2 후속) -->
+<div id="lpMenu">
+  <button id="lpAddrBtn" onclick="lpShowAddress()">📍 여기 주소보기</button>
+  <button id="lpActionBtn" onclick="lpDoAction()">📝 메모등록</button>
 </div>
 
 <!-- 레이어 (배경지도 + 오버레이 + 참조 도형 DXF/SHP) 통합 시트 -->
@@ -1109,6 +1135,21 @@ async function vworldAddressQuery(query, category) {
     return (data.response.result && data.response.result.items) || [];
   }
   return [];
+}
+
+// 좌표→주소 역지오코딩(§12.2 후속, 길게누르기/우클릭 "여기 주소보기") — 기보유 VWORLD_KEY 재사용, 별도 키 불필요.
+// 도로명(road) 우선 조회, 없으면 지번(parcel) 폴백(주소검색의 road→parcel 폴백과 동일 패턴).
+async function vworldReverseGeocode(lat, lng) {
+  for (const type of ['road', 'parcel']) {
+    const url = `https://api.vworld.kr/req/address?service=address&request=getAddress&version=2.0`
+      + `&crs=epsg:4326&point=${lng},${lat}&type=${type}&format=json&errorformat=json`
+      + `&key=${VWORLD_KEY}&domain=${location.hostname}`;
+    const data = await vworldJsonp(url);
+    const item = data && data.response && data.response.status === 'OK' &&
+      data.response.result && data.response.result[0];
+    if (item && item.text) return item.text;
+  }
+  return null;
 }
 
 // 행정구역(시도/시군구/읍면동/리) 자체를 하나의 결과로 반환 — road/parcel 검색은 "간전면" 같은 구역명 자체를
@@ -2026,6 +2067,123 @@ window.addEventListener('mouseup', onMapSelEnd);
 map.getContainer().addEventListener('touchstart', onMapSelStart, { passive: false });
 map.getContainer().addEventListener('touchmove', onMapSelMove, { passive: false });
 map.getContainer().addEventListener('touchend', onMapSelEnd);
+
+// ========== 지도 길게누르기(모바일)/우클릭(PC) 미니메뉴 ==========
+// [여기 주소보기]는 항상 제공. 대상이 단일 마커(포인트/사진)면 [정보수정], 빈 지도면 [메모등록]으로 두번째 버튼이 바뀐다.
+// 겹친(그룹) 마커는 항목이 여럿이라 애매하므로 대상에서 제외(기존 목록 팝업의 개별 정보수정 버튼을 그대로 이용).
+let lpLatLng = null, lpRecordId = null, lpLastAddr = null;
+let lpTouchTimer = null, lpTouchStartPt = null, lpTouchFired = false;
+const LP_HOLD_MS = 550, LP_MOVE_TOL = 10, LP_SNAP_PX = 22;
+
+function findRecordMarkerNear(containerPoint) {
+  let best = null, bestDist = LP_SNAP_PX;
+  recordMarkers.forEach(m => {
+    if (m._groupKey) return;   // 그룹 마커는 제외
+    const p = map.latLngToContainerPoint(m.getLatLng());
+    const d = p.distanceTo(containerPoint);
+    if (d <= bestDist) { bestDist = d; best = m; }
+  });
+  return best;
+}
+function lpBlocked() {
+  // 다른 모드(작도/위치지정/영역선택/이동) 진행 중에는 길게누르기 메뉴를 띄우지 않음(충돌 방지)
+  return drawing || pickingLocation || mapSelectMode || !!moveState;
+}
+function openLpMenu(containerPoint, latlng) {
+  if (lpBlocked()) return;
+  const nearMarker = findRecordMarkerNear(containerPoint);
+  lpLatLng = latlng;
+  lpRecordId = nearMarker ? nearMarker._recordId : null;
+  document.getElementById('lpActionBtn').textContent = lpRecordId ? '📝 정보수정' : '📝 메모등록';
+  const menu = document.getElementById('lpMenu');
+  const rect = map.getContainer().getBoundingClientRect();
+  menu.style.display = 'block';
+  let x = rect.left + containerPoint.x, y = rect.top + containerPoint.y;
+  const mw = menu.offsetWidth || 150, mh = menu.offsetHeight || 90;
+  x = Math.min(x, window.innerWidth - mw - 8);
+  y = Math.min(y, window.innerHeight - mh - 8);
+  menu.style.left = Math.max(8, x) + 'px';
+  menu.style.top = Math.max(8, y) + 'px';
+}
+function closeLpMenu() { document.getElementById('lpMenu').style.display = 'none'; }
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('lpMenu');
+  if (menu.style.display === 'block' && !menu.contains(e.target)) closeLpMenu();
+});
+function lpDoAction() {
+  const id = lpRecordId, latlng = lpLatLng;
+  closeLpMenu();
+  if (id) { editFromMap(id); }
+  else if (latlng) { setPickedLocation(latlng.lat, latlng.lng, '🖱️ 길게누른 위치'); }
+}
+function lpShowAddress() {
+  const latlng = lpLatLng;
+  closeLpMenu();
+  if (!latlng) return;
+  lpLastAddr = null;
+  const popup = L.popup({ closeButton: true })
+    .setLatLng(latlng)
+    .setContent('<div class="addr-popup-body">주소 조회 중…</div>')
+    .openOn(map);
+  vworldReverseGeocode(latlng.lat, latlng.lng).then(addr => {
+    lpLastAddr = addr;
+    const body = addr
+      ? `<div class="addr-popup-body"><div class="addr-popup-text">${esc(addr)}</div>` +
+        `<button class="addr-copy-btn" onclick="copyLpAddr(this)">📋 주소 복사</button></div>`
+      : `<div class="addr-popup-body">주소를 찾을 수 없습니다.</div>`;
+    popup.setContent(body);
+  });
+}
+function copyLpAddr(btn) {
+  if (!lpLastAddr) return;
+  const done = () => { const old = btn.textContent; btn.textContent = '✅ 복사됨'; setTimeout(() => { btn.textContent = old; }, 1200); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(lpLastAddr).then(done).catch(() => fallbackCopy(lpLastAddr, done));
+  } else {
+    fallbackCopy(lpLastAddr, done);
+  }
+}
+function fallbackCopy(text, done) {
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); done(); } catch (e) {}
+  document.body.removeChild(ta);
+}
+// PC 우클릭 — Leaflet이 native contextmenu의 preventDefault를 이미 처리함(브라우저 기본 메뉴 안 뜸).
+// 안드로이드 크롬은 지도 타일(<img>) 위 롱프레스 시 이 이벤트가 함께 발생해 별도 처리 없이도 동작.
+map.on('contextmenu', (e) => { openLpMenu(e.containerPoint, e.latlng); });
+// iOS Safari 등 롱프레스에서 contextmenu가 안정적으로 발생하지 않는 환경 대응 — 수동 타이머 방식 보강.
+// (안드로이드에서 위 contextmenu로 이미 열렸으면 lpTouchFired로 중복 실행 방지)
+function lpTouchStart(e) {
+  if (lpBlocked() || e.touches.length !== 1) return;
+  const t = e.touches[0];
+  lpTouchStartPt = { x: t.clientX, y: t.clientY };
+  lpTouchFired = false;
+  clearTimeout(lpTouchTimer);
+  lpTouchTimer = setTimeout(() => {
+    if (lpBlocked()) return;
+    lpTouchFired = true;
+    if (map.tap) map.tap.disable();
+    const rect = map.getContainer().getBoundingClientRect();
+    const cp = L.point(lpTouchStartPt.x - rect.left, lpTouchStartPt.y - rect.top);
+    openLpMenu(cp, map.containerPointToLatLng(cp));
+  }, LP_HOLD_MS);
+}
+function lpTouchMove(e) {
+  if (!lpTouchStartPt || e.touches.length !== 1) return;
+  const t = e.touches[0];
+  const d = Math.hypot(t.clientX - lpTouchStartPt.x, t.clientY - lpTouchStartPt.y);
+  if (d > LP_MOVE_TOL) { clearTimeout(lpTouchTimer); lpTouchStartPt = null; }
+}
+function lpTouchEnd() {
+  clearTimeout(lpTouchTimer);
+  lpTouchStartPt = null;
+  if (lpTouchFired) { setTimeout(() => { if (map.tap) map.tap.enable(); }, 120); lpTouchFired = false; }
+}
+map.getContainer().addEventListener('touchstart', lpTouchStart, { passive: true });
+map.getContainer().addEventListener('touchmove', lpTouchMove, { passive: true });
+map.getContainer().addEventListener('touchend', lpTouchEnd);
 
 // ========== 선형 도형(하천선·도로선 등) 표시 ==========
 // 선형은 하천에 한정되지 않음 — 도로작업이면 도로선이 될 수 있음(category로 구분).
@@ -3326,12 +3484,60 @@ async function openPhotoView(id, gid) {
   document.getElementById('ppTitle').textContent = ppParts.join(' · ');
   document.getElementById('photoPanel').style.display = 'flex';
   updatePhotoNav();
+  ppResetZoom();   // 사진(첫 열기·◀▶ 넘김) 전환 시 항상 배율 초기화
 }
 function closePhotoView() {
   document.getElementById('photoPanel').style.display = 'none';
   photoViewId = null;
   photoViewGroupId = '';
 }
+// ---- 사진 핀치 줌(§ 후속) — 두 손가락 확대/축소 + (확대 상태) 한 손가락 이동 ----
+// 현장에서 확대 팝업의 글자정보를 더 크게 보기 위한 용도. object-fit:contain 위에 transform으로 배율만 얹는다.
+let ppScale = 1, ppX = 0, ppY = 0;
+let ppPinchStartDist = 0, ppPinchStartScale = 1;
+let ppTouchMode = null;   // 'pinch' | 'pan'
+let ppPanStart = null, ppStartXY = null;
+function ppDist(t1, t2) { return Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY); }
+function ppApplyTransform() {
+  document.getElementById('ppImg').style.transform = `translate(${ppX}px, ${ppY}px) scale(${ppScale})`;
+}
+function ppResetZoom() { ppScale = 1; ppX = 0; ppY = 0; ppTouchMode = null; ppApplyTransform(); }
+function ppTouchStart(e) {
+  if (e.touches.length === 2) {
+    ppTouchMode = 'pinch';
+    ppPinchStartDist = ppDist(e.touches[0], e.touches[1]);
+    ppPinchStartScale = ppScale;
+    e.preventDefault();
+  } else if (e.touches.length === 1 && ppScale > 1.02) {
+    ppTouchMode = 'pan';
+    ppPanStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    ppStartXY = { x: ppX, y: ppY };
+  }
+}
+function ppTouchMove(e) {
+  if (ppTouchMode === 'pinch' && e.touches.length === 2) {
+    e.preventDefault();
+    const d = ppDist(e.touches[0], e.touches[1]);
+    let s = ppPinchStartScale * (d / ppPinchStartDist);
+    ppScale = Math.min(4, Math.max(1, s));
+    if (ppScale <= 1.02) { ppX = 0; ppY = 0; }
+    ppApplyTransform();
+  } else if (ppTouchMode === 'pan' && e.touches.length === 1) {
+    e.preventDefault();
+    ppX = ppStartXY.x + (e.touches[0].clientX - ppPanStart.x);
+    ppY = ppStartXY.y + (e.touches[0].clientY - ppPanStart.y);
+    ppApplyTransform();
+  }
+}
+function ppTouchEnd(e) {
+  if (e.touches.length === 0) {
+    ppTouchMode = null;
+    if (ppScale <= 1.02) ppResetZoom();
+  }
+}
+document.getElementById('ppImg').addEventListener('touchstart', ppTouchStart, { passive: false });
+document.getElementById('ppImg').addEventListener('touchmove', ppTouchMove, { passive: false });
+document.getElementById('ppImg').addEventListener('touchend', ppTouchEnd);
 // 겹친 지점(같은 그룹) 여러 장 넘겨보기 — 그룹 컨텍스트에서 열린 경우만 ◀▶·점 표시
 function updatePhotoNav() {
   const prev = document.getElementById('ppPrev'), next = document.getElementById('ppNext'), dots = document.getElementById('ppDots');
