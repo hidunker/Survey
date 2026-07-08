@@ -941,12 +941,6 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-// ========== 배포 config (배포처마다 다른 값은 이 블록에만) ==========
-// GitHub Pages 배포용. 회사서버(sitesurveyjay.kecc.co.kr) 배포는 index_kecc_server.html에서
-// 이 블록의 VWORLD_KEY/DEPLOY_DOMAIN_HINT만 교체한 사본을 별도 관리.
-const VWORLD_KEY = 'BBCD79DD-0859-3B41-A7C9-34898DA8FC43';
-const DEPLOY_DOMAIN_HINT = 'GitHub Pages 도메인';
-
 // ========== 공통 상수 ==========
 const BUILD = '2026-07-06d (조사경로 트래킹 — 위치권한 거부 시 즉시 안내, GPS신호 장기미수신 경고)';
 console.log('현장조사 build:', BUILD);
@@ -958,12 +952,833 @@ function kindOptions(sel) {
 document.getElementById('kindInput').innerHTML   = kindOptions('하천');
 document.getElementById('bulkKind').innerHTML    = kindOptions('하천');
 document.getElementById('kindChangeSelect').innerHTML = kindOptions('하천');
-</script>
-<script src="js/map-init.js"></script>
-<script src="js/storage.js"></script>
-<script src="js/line-binding.js"></script>
-<script src="js/project.js"></script>
-<script>
+
+// ========== 지도 초기화 ==========
+const VWORLD_KEY = 'BBCD79DD-0859-3B41-A7C9-34898DA8FC43';
+const vworldUrl = (layer, ext) =>
+  `https://api.vworld.kr/req/wmts/1.0.0/${VWORLD_KEY}/${layer}/{z}/{y}/{x}.${ext}`;
+
+// closePopupOnClick:false — 겹친지점 목록↔상세↔사진확대를 setPopupContent로 전환할 때
+//   교체되는 노드로 인해 클릭이 지도로 전파돼 팝업이 닫히던 문제 차단(§12.2[2] 연속작업).
+const map = L.map('map', { zoomControl: false, closePopupOnClick: false }).setView([36.5, 127.8], 7); // 대한민국 중심
+
+const vBase   = L.tileLayer(vworldUrl('Base', 'png'),       { maxZoom: 19, attribution: 'VWorld' });
+const vSat    = L.tileLayer(vworldUrl('Satellite', 'jpeg'), { maxZoom: 19, attribution: 'VWorld' });
+const vHybrid = L.tileLayer(vworldUrl('Hybrid', 'png'),     { maxZoom: 19 });
+const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                            { maxZoom: 19, attribution: 'Esri' });
+const osm     = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                            { maxZoom: 19, attribution: '© OpenStreetMap' });
+
+// 주의: vBase는 로그인 성공 후 startApp()에서 지도에 추가한다.
+// (로그인 전 타일을 미리 불러 VWorld API 호출이 낭비되는 것을 방지)
+
+const baseLayers = {
+  '일반지도 (VWorld)':     vBase,
+  '위성지도 (VWorld)':     vSat,
+  '위성 (Esri·키불필요)':  esriSat,
+  '일반 (OSM·대체)':       osm,
+};
+// 지적도(연속지적도) 참고용 오버레이 — VWorld WMS. 확대(z14+)에서만 표출.
+// ⚠ API 지적은 최신이 아닐 수 있음 → 참고용. 성과품은 반드시 지자체 취득 지적으로 작업.
+// (WMS 사용에는 VWorld 키에 WMS 권한 + 도메인 등록 필요. 미허용 시 타일만 비표시되고 앱은 정상.)
+// ※ 2026-07-05: tileSize:512+zoomOffset:-1로 "고쳐봤다가" 실제 배포 화면에서 오히려 안 뜨는 것으로
+//   확인돼 되돌림(원래 이 코드가 실제 화면에서는 정상 표출됨을 스크린샷으로 확인). curl 직접호출로는
+//   256×256이 매번 빈 이미지였지만, 이는 curl에 브라우저의 Referer 헤더가 없어서였을 가능성이 큼
+//   (VWorld가 domain 파라미터 외에 Referer도 검사할 경우 curl 검증 자체가 신뢰 불가). 상세는 §10.6 후속 정정.
+const cadastralUrl = `https://api.vworld.kr/req/wms?key=${VWORLD_KEY}&domain=${location.hostname}`;
+const cadastral = L.tileLayer.wms(cadastralUrl, {
+  layers: 'lp_pa_cbnd_bubun', styles: 'lp_pa_cbnd_bubun',
+  format: 'image/png', transparent: true, version: '1.3.0',
+  opacity: 0.55, maxZoom: 19, attribution: 'VWorld 지적(참고용)'
+});
+function onCadastralOn() {
+  document.getElementById('cadastralNote').style.display = 'block';
+  applyCadastralStyle();   // 위성이면 흰계열 보정 적용
+  if (!sessionStorage.getItem('cadastral_notified')) {
+    sessionStorage.setItem('cadastral_notified', '1');
+    alert('지적도(연속지적도)는 참고용입니다.\n\n' +
+      '• 실제 성과품은 반드시 지자체에서 취득한 지적으로 작업하세요.\n' +
+      '• VWorld API 지적은 최신이 아닐 수 있습니다.\n' +
+      '• 많이 확대(줌인)하면 경계가 표시됩니다.');
+  }
+}
+function onCadastralOff() { document.getElementById('cadastralNote').style.display = 'none'; }
+cadastral.on('add', onCadastralOn);
+cadastral.on('remove', onCadastralOff);
+
+const overlays = { '위성 지명·경계': vHybrid, '지적도 (참고용·VWorld)': cadastral };
+// ★ 레이어 통합 버튼(28a): 기본 Leaflet 컨트롤 대신 🗺️ 레이어 버튼 → 하단 시트로 통합
+//   (스마트폰에서 좌·우 패널이 동시에 펼쳐져 지도를 가리던 간섭 해소 — 명세 §10.11)
+const BASE_LAYERS = {
+  vbase: { label: '일반지도 (VWorld)', layer: vBase,   sat: false },
+  vsat:  { label: '위성 (VWorld)',     layer: vSat,    sat: true  },
+  osm:   { label: '일반지도 (OSM)',    layer: osm,     sat: false },
+  esri:  { label: '위성 (Esri)',       layer: esriSat, sat: true  },
+};
+let currentBaseKey = 'vbase';
+function selectBase(key) {
+  const def = BASE_LAYERS[key];
+  if (!def) return;
+  Object.values(BASE_LAYERS).forEach(d => { if (map.hasLayer(d.layer)) map.removeLayer(d.layer); });
+  def.layer.addTo(map);
+  if (def.layer.bringToBack) def.layer.bringToBack();   // 배경은 항상 맨 아래
+  currentBaseKey = key;
+  onBaseChanged(def.sat);
+}
+// 배경 변경 후 일괄 재스타일(구 baselayerchange 핸들러를 함수화)
+function onBaseChanged(sat) {
+  isSatellite = sat;
+  if (sat && document.getElementById('ovHybrid') && document.getElementById('ovHybrid').checked && !map.hasLayer(vHybrid)) vHybrid.addTo(map);
+  if (!sat && map.hasLayer(vHybrid)) map.removeLayer(vHybrid);
+  applyMarkerStyles();
+  applyCadastralStyle();
+  applyRefShapeStyle();
+  applyLpParcelStyle();
+  loadFeatures();            // 선형/구역 위성 흰 글로우(halo) 재적용
+  loadOverlays();            // SHP 배경적응 색 재적용
+  if (typeof dirFanRecord !== 'undefined' && dirFanRecord) showDirFan(dirFanRecord);   // 촬영방향 부채꼴도 배경적응 색 재적용
+}
+
+// 참조 도형(DXF/SHP) 전용 pane — SVG 렌더러로 두어 위성에서 외곽선 글로우(CSS filter) 일괄 적용
+map.createPane('refShapes');
+map.getPane('refShapes').style.zIndex = 450;   // 마커(600)보다 아래, 타일(200)보다 위
+const refRenderer = L.svg({ pane: 'refShapes' });
+// "여기 주소보기" 필지 테두리 강조 전용 pane — refShapes보다 위, 마커보다 아래
+map.createPane('parcelHi');
+map.getPane('parcelHi').style.zIndex = 455;
+// DXF 텍스트(측점) 라벨 전용 pane — refShapes(455)보다 위, 사진마커(600)보다 아래.
+// 별도 pane으로 두어 위성 CSS필터(밝기보정) 영향을 안 받고, 줌 임계값으로 저줌 클러터 억제.
+map.createPane('dxfLabels');
+map.getPane('dxfLabels').style.zIndex = 460;
+const DXF_LABEL_MINZOOM = 14;   // 이 줌 미만에서는 라벨 숨김(측점 과밀 방지)
+function updateDxfLabelVis() {
+  const p = map.getPane('dxfLabels');
+  if (p) p.style.display = (map.getZoom() >= DXF_LABEL_MINZOOM) ? '' : 'none';
+}
+map.on('zoomend', updateDxfLabelVis);
+L.control.zoom({ position: 'topright' }).addTo(map);
+L.control.scale({ position: 'bottomleft', metric: true, imperial: false, maxWidth: 140 }).addTo(map);
+
+const NorthArrow = L.Control.extend({
+  options: { position: 'topleft' },
+  onAdd() {
+    const div = L.DomUtil.create('div', 'north-arrow');
+    div.title = '북(North)';
+    div.innerHTML = `<svg width="36" height="44" viewBox="0 0 36 44" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="18" cy="25" r="14" fill="#fff" stroke="#ccc" stroke-width="1"/>
+      <polygon points="18,12 23,27 18,23 13,27" fill="#d32f2f"/>
+      <polygon points="18,23 23,27 18,38 13,27" fill="#8a8a8a"/>
+      <text x="18" y="10" text-anchor="middle" font-size="10" font-weight="700" fill="#333">N</text>
+    </svg>`;
+    return div;
+  }
+});
+map.addControl(new NorthArrow());
+
+// 주소 검색(§12.2[8]) — VWorld 검색 API 재사용(기보유 VWORLD_KEY, 별도 키 불필요)
+let addrSearchMarker = null;
+const AddressSearch = L.Control.extend({
+  options: { position: 'topleft' },
+  onAdd() {
+    const wrap = L.DomUtil.create('div', 'addr-search');
+    wrap.innerHTML = `
+      <div class="addr-search-btn" id="addrSearchBtn" title="주소 검색">🔍</div>
+      <div class="addr-search-box" id="addrSearchBox">
+        <div class="as-row">
+          <input type="text" id="addrSearchInput" placeholder="주소 입력 (지번/도로명)">
+          <button type="button" class="as-go" id="addrSearchGo">검색</button>
+        </div>
+        <div id="addrSearchResult"></div>
+      </div>`;
+    L.DomEvent.disableClickPropagation(wrap);
+    L.DomEvent.disableScrollPropagation(wrap);
+    return wrap;
+  }
+});
+map.addControl(new AddressSearch());
+
+document.getElementById('addrSearchBtn').addEventListener('click', () => {
+  const box = document.getElementById('addrSearchBox');
+  const btn = document.getElementById('addrSearchBtn');
+  const willOpen = !box.classList.contains('open');
+  box.classList.toggle('open', willOpen);
+  btn.classList.toggle('active', willOpen);
+  if (willOpen) document.getElementById('addrSearchInput').focus();
+});
+document.getElementById('addrSearchGo').addEventListener('click', runAddressSearch);
+document.getElementById('addrSearchInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') runAddressSearch();
+});
+
+// VWorld req/search는 fetch(CORS) 응답을 막아둠(WMTS 타일은 <img>라 무관하게 됨) → JSONP(callback)로 우회.
+function vworldJsonp(url) {
+  return new Promise((resolve) => {
+    const cbName = '_vwCb' + Date.now() + Math.floor(Math.random() * 1e4);
+    const timer = setTimeout(() => { cleanup(); resolve(null); }, 6000);
+    function cleanup() {
+      clearTimeout(timer);
+      delete window[cbName];
+      if (script.parentNode) script.parentNode.removeChild(script);
+    }
+    window[cbName] = (data) => { cleanup(); resolve(data); };
+    const script = document.createElement('script');
+    script.src = url + '&callback=' + cbName;
+    script.onerror = () => { cleanup(); resolve(null); };
+    document.head.appendChild(script);
+  });
+}
+
+async function vworldAddressQuery(query, category) {
+  const url = `https://api.vworld.kr/req/search?service=search&request=search&version=2.0`
+    + `&crs=EPSG:4326&query=${encodeURIComponent(query)}&type=address&category=${category}`
+    + `&format=json&errorformat=json&size=10&page=1`
+    + `&key=${VWORLD_KEY}&domain=${location.hostname}`;
+  const data = await vworldJsonp(url);
+  if (data && data.response && data.response.status === 'OK') {
+    return (data.response.result && data.response.result.items) || [];
+  }
+  return [];
+}
+
+// 좌표→주소 역지오코딩(§12.2 후속, 길게누르기/우클릭 "여기 주소보기") — 기보유 VWORLD_KEY 재사용, 별도 키 불필요.
+// 도로명(road) 우선 조회, 없으면 지번(parcel) 폴백(주소검색의 road→parcel 폴백과 동일 패턴).
+async function vworldReverseGeocode(lat, lng) {
+  for (const type of ['road', 'parcel']) {
+    const url = `https://api.vworld.kr/req/address?service=address&request=getAddress&version=2.0`
+      + `&crs=epsg:4326&point=${lng},${lat}&type=${type}&format=json&errorformat=json`
+      + `&key=${VWORLD_KEY}&domain=${location.hostname}`;
+    const data = await vworldJsonp(url);
+    const item = data && data.response && data.response.status === 'OK' &&
+      data.response.result && data.response.result[0];
+    if (item && item.text) return item.text;
+  }
+  return null;
+}
+
+// 좌표→그 지점이 속한 필지 1개의 경계(GeoJSON geometry)만 조회(§3.1 지적 WMS와 별개인 VWorld 데이터API·연속지적도)
+// "여기 주소보기"에서 주소와 함께 그 필지 테두리만 살짝 강조하기 위함. ⚠ 지적도와 동일하게 참고용(§3.1 안내 재사용).
+async function vworldParcelGeom(lat, lng) {
+  const url = `https://api.vworld.kr/req/data?service=data&request=GetFeature&data=LP_PA_CBND_BUBUN`
+    + `&geomFilter=POINT(${lng} ${lat})&geometry=true&attribute=false&crs=EPSG:4326`
+    + `&format=json&errorformat=json&size=1`
+    + `&key=${VWORLD_KEY}&domain=${location.hostname}`;
+  const data = await vworldJsonp(url);
+  const fc = data && data.response && data.response.status === 'OK' &&
+    data.response.result && data.response.result.featureCollection;
+  const feat = fc && fc.features && fc.features[0];
+  return (feat && feat.geometry) || null;
+}
+
+// 행정구역(시도/시군구/읍면동/리) 자체를 하나의 결과로 반환 — road/parcel 검색은 "간전면" 같은 구역명 자체를
+// 결과로 주지 않고(건물주소만 나옴) 구역명이 포함된 건물주소 수천 건을 반환하므로 별도 API(type=district) 필요.
+// L1~L4를 병렬 조회해 병합(레벨별 상세도 다름 → 줌 레벨도 레벨별로 다르게).
+const DISTRICT_ZOOM = { L1: 10, L2: 12, L3: 13, L4: 14 };
+async function vworldDistrictQuery(query) {
+  const levels = Object.keys(DISTRICT_ZOOM);
+  const perLevel = await Promise.all(levels.map(async (lv) => {
+    const url = `https://api.vworld.kr/req/search?service=search&request=search&version=2.0`
+      + `&crs=EPSG:4326&query=${encodeURIComponent(query)}&type=district&category=${lv}`
+      + `&format=json&errorformat=json&size=10&page=1`
+      + `&key=${VWORLD_KEY}&domain=${location.hostname}`;
+    const data = await vworldJsonp(url);
+    if (data && data.response && data.response.status === 'OK') {
+      const items = (data.response.result && data.response.result.items) || [];
+      return items.map((it) => ({ ...it, _kind: 'district', _zoom: DISTRICT_ZOOM[lv] }));
+    }
+    return [];
+  }));
+  const seen = new Set();
+  const merged = [];
+  perLevel.flat().forEach((it) => {
+    if (seen.has(it.id)) return;
+    seen.add(it.id);
+    merged.push(it);
+  });
+  return merged;
+}
+
+// 검색 결과 표시용 라벨: 행정구역은 title, 그 외는 건물명(있으면) 우선 → 도로명/지번 주소
+function addrItemLabel(it) {
+  if (it._kind === 'district') return `🏛️ ${it.title}`;
+  const a = it.address || {};
+  return a.bldnm || a.road || a.parcel || '(이름 없음)';
+}
+
+async function runAddressSearch() {
+  const input = document.getElementById('addrSearchInput');
+  const resultBox = document.getElementById('addrSearchResult');
+  const query = input.value.trim();
+  if (!query) return;
+  resultBox.innerHTML = `<div class="addr-empty">검색 중…</div>`;
+  const districtItems = await vworldDistrictQuery(query);
+  let addrItems = await vworldAddressQuery(query, 'road');
+  if (!addrItems.length) addrItems = await vworldAddressQuery(query, 'parcel');
+  const items = [...districtItems, ...addrItems];
+  if (!items.length) {
+    resultBox.innerHTML = `<div class="addr-empty">검색 결과가 없습니다.</div>`;
+    return;
+  }
+  if (items.length === 1) {
+    selectAddressResult(items[0]);
+    return;
+  }
+  resultBox.innerHTML = `<div class="addr-result-list">`
+    + items.map((it, i) => `<div class="addr-result-item${it._kind === 'district' ? ' addr-result-district' : ''}" data-i="${i}">${esc(addrItemLabel(it))}</div>`).join('')
+    + `</div>`;
+  resultBox.querySelectorAll('.addr-result-item').forEach((el) => {
+    el.addEventListener('click', () => selectAddressResult(items[+el.dataset.i]));
+  });
+}
+
+function selectAddressResult(item) {
+  const lng = parseFloat(item.point && item.point.x);
+  const lat = parseFloat(item.point && item.point.y);
+  if (!isFinite(lat) || !isFinite(lng)) return;
+  if (addrSearchMarker) { map.removeLayer(addrSearchMarker); addrSearchMarker = null; }
+  const isDistrict = item._kind === 'district';
+  const title = isDistrict ? item.title : addrItemLabel(item);
+  const addr = (!isDistrict && item.address && (item.address.road || item.address.parcel)) || '';
+  addrSearchMarker = L.marker([lat, lng]).addTo(map)
+    .bindPopup(`<b>📍 ${esc(title)}</b>`
+      + (addr && addr !== title ? `<div style="font-size:12px;color:#555;">${esc(addr)}</div>` : '')
+      + `<div class="addr-src-note">출처: VWorld 지오코더</div>`)
+    .openPopup();
+  map.setView([lat, lng], isDistrict ? item._zoom : 17);
+  const box = document.getElementById('addrSearchBox');
+  const btn = document.getElementById('addrSearchBtn');
+  box.classList.remove('open');
+  btn.classList.remove('active');
+}
+
+let vworldFailed = false;
+vBase.on('tileerror', () => {
+  if (vworldFailed) return;
+  vworldFailed = true;
+  if (map.hasLayer(vBase)) { map.removeLayer(vBase); osm.addTo(map); }
+  console.warn('VWorld 타일 로드 실패 → OSM 임시 대체. GitHub Pages 도메인 등록 후 정상 동작합니다.');
+});
+
+// 배경에 따라 마커 가시색 결정 — divIcon(DOM) 기반으로 Canvas/SVG 렌더러 의존 제거
+// (circleMarker Canvas 렌더가 안드로이드 일괄 추가 시 flush 안 되는 문제 근본 해결)
+let isSatellite = false;
+function createMarkerIcon(count) {
+  const bg  = isSatellite ? '#ff2d95' : '#43a047';
+  const bdr = isSatellite ? '#ffffff' : '#2e7d32';
+  // 겹친(유사) 포인트: 우상단에 장수 배지 → 탭하면 목록 팝업(§12.2[2])
+  const badge = (count && count > 1)
+    ? `<div style="position:absolute;top:-8px;right:-8px;min-width:16px;height:16px;padding:0 3px;border-radius:8px;background:#1565c0;color:#fff;font-size:11px;font-weight:700;line-height:16px;text-align:center;border:1.5px solid #fff;box-sizing:border-box;box-shadow:0 1px 3px rgba(0,0,0,0.4);">${count}</div>`
+    : '';
+  return L.divIcon({
+    className: '',
+    html: `<div style="position:relative;width:18px;height:18px;">`
+        + `<div style="width:18px;height:18px;border-radius:50%;background:${bg};border:2.5px solid ${bdr};box-shadow:0 1px 4px rgba(0,0,0,0.45);"></div>`
+        + badge + `</div>`,
+    // popupAnchor를 위로 크게 띄움(-9→-70) — 촬영방향 부채꼴(반경 70px, dirFanPane)이 마커 주위에 뜰 때
+    // 정보창이 그 위를 덮어 방향(특히 마커 위쪽 방향)이 안 보이던 문제 보완(2026-07 실무자 의견)
+    iconSize: [18, 18], iconAnchor: [9, 9], popupAnchor: [0, -70]
+  });
+}
+function applyMarkerStyles() { recordMarkers.forEach(m => m.setIcon(createMarkerIcon(m._groupCount))); }
+
+// 지적도(WMS 래스터)는 노란 경계선이 위성 배경에서 잘 안 보임 → 위성일 때 타일에 필터로 흰계열 보정
+function applyCadastralStyle() {
+  if (!map.hasLayer(cadastral)) return;
+  const c = cadastral.getContainer && cadastral.getContainer();
+  if (isSatellite) {
+    // 위성: 경계·글자는 선명하게(밝기·대비·외곽선) 하되, 뒤 위성이 더 비치도록 불투명도는 0.85로(↓10%p)
+    cadastral.setOpacity(0.85);
+    if (c) c.style.filter = 'brightness(1.7) contrast(1.5) drop-shadow(0 0 1px #000) drop-shadow(0 0 1px #000)';
+  } else {
+    cadastral.setOpacity(0.55);
+    if (c) c.style.filter = '';
+  }
+}
+// 참조 도형(DXF/SHP) pane — 위성에서 검은 외곽선 글로우로 가시성 확보
+function applyRefShapeStyle() {
+  const p = map.getPane('refShapes');
+  if (p) p.style.filter = isSatellite
+    ? 'drop-shadow(0 0 1px rgba(0,0,0,0.95)) drop-shadow(0 0 1px rgba(0,0,0,0.95))' : '';
+}
+
+// "여기 주소보기" 필지 테두리 강조 — 채우기 없이 선만, 배경(일반/위성)에 따라 잘 보이는 색으로 전환
+let lpParcelLayer = null;
+function parcelHiStyle() {
+  return isSatellite
+    ? { color: '#ffee33', weight: 3, opacity: 0.95, fillOpacity: 0 }
+    : { color: '#e91e63', weight: 3, opacity: 0.9, fillOpacity: 0 };
+}
+function applyLpParcelStyle() {
+  if (lpParcelLayer) lpParcelLayer.setStyle(parcelHiStyle());
+  const p = map.getPane('parcelHi');
+  if (p) p.style.filter = isSatellite
+    ? 'drop-shadow(0 0 1.5px rgba(0,0,0,0.9)) drop-shadow(0 0 1.5px rgba(0,0,0,0.9))' : '';
+}
+function clearLpParcelHighlight() {
+  if (lpParcelLayer) { map.removeLayer(lpParcelLayer); lpParcelLayer = null; }
+}
+// 여러 번 연달아 "여기 주소보기"를 눌러도, 마지막 호출한 좌표의 결과만 반영되도록 세대(gen) 비교로 경합 방지.
+let lpParcelReqGen = 0;
+function showLpParcelHighlight(lat, lng) {
+  clearLpParcelHighlight();
+  const gen = ++lpParcelReqGen;
+  vworldParcelGeom(lat, lng).then(geom => {
+    if (!geom || gen !== lpParcelReqGen) return;
+    lpParcelLayer = L.geoJSON(geom, { pane: 'parcelHi', interactive: false, style: parcelHiStyle() }).addTo(map);
+  });
+}
+// (배경 전환 로직은 selectBase()→onBaseChanged()로 이동 — 위 레이어 통합 버튼 참조)
+
+let myMarker = null;
+let selMarker = null;   // 등록 위치 지정 시 지도에 보여줄 핀
+let currentPos = null;
+let currentPhoto = null;
+let currentPhotoName = null;   // 최초 불러온 사진의 원본 파일명(내보내기 파일명·CSV에 사용)
+let currentShot = null;        // EXIF 촬영일시(ms). 없으면 null → 등록시각으로 폴백
+let currentDir = null;         // 촬영방향 {deg, src:'exif'|'dji'}. 없으면 null(기기가 방향을 안 남긴 경우 다수)
+let photoLocated = false;
+let editId = null;
+let editOrigPos = null;        // 수정 진입 시점의 원래 포인트 좌표(사진 GPS와 비교용, currentPos와 별개로 보존)
+let pendingPhotoLocMismatch = null;   // 포인트 유지 선택 시 사진의 실제 촬영좌표(참고용, rec.photoLocMismatch로 저장)
+let photoLocConflictResolver = null;
+let cameFromList = false;   // 목록에서 수정 진입 → 저장 후 목록 복귀
+let pickingLocation = false;
+
+// ========== IndexedDB (projects → records) ==========
+let db;
+let currentProjectId = null;
+const DB_NAME = 'fieldSurveyDB';
+const STORE = 'records';
+const PROJECTS = 'projects';
+const FEATURES = 'features';   // 도형(하천선·댐구역·지점)
+const OVERLAYS = 'overlays';   // 참조 도형 레이어(DXF/SHP) — 토글용, 귀속 대상 아님
+
+function initDB() {
+  const req = indexedDB.open(DB_NAME, 4);
+  req.onupgradeneeded = e => {
+    const idb = e.target.result;
+    if (!idb.objectStoreNames.contains(STORE))    idb.createObjectStore(STORE, { keyPath: 'id' });
+    if (!idb.objectStoreNames.contains(PROJECTS)) idb.createObjectStore(PROJECTS, { keyPath: 'id' });
+    if (!idb.objectStoreNames.contains(FEATURES)) idb.createObjectStore(FEATURES, { keyPath: 'id' });
+    if (!idb.objectStoreNames.contains(OVERLAYS)) idb.createObjectStore(OVERLAYS, { keyPath: 'id' });
+  };
+  req.onsuccess = e => { db = e.target.result; migrateAndInit(); };
+  req.onerror = () => alert('저장소를 열 수 없습니다.');
+}
+
+async function migrateAndInit() {
+  const projects = await getAllProjects();
+  if (projects.length === 0) {
+    // 최초 실행 — 자동 '기본 사업'을 만들지 않고, 사용자가 첫 사업을 만들 때까지 막아둠.
+    // (공유 시 기기마다 같던 'default' id가 사라져 사업 충돌도 원천 방지)
+    document.getElementById('firstProjOverlay').classList.add('show');
+    setTimeout(() => document.getElementById('firstProjName')?.focus(), 120);
+    return;
+  }
+  await finishInit(projects);
+}
+// 게이트에서 첫 사업 생성 → 초기화 이어가기
+async function createFirstProject() {
+  const inp = document.getElementById('firstProjName');
+  const name = (inp.value || '').trim();
+  if (!name) { alert('사업명을 입력해 주세요.'); inp.focus(); return; }
+  const id = 'p' + Date.now();
+  await putProject({ id, name, created: Date.now() });
+  document.getElementById('firstProjOverlay').classList.remove('show');
+  inp.value = '';
+  await finishInit(await getAllProjects());
+}
+async function finishInit(projects) {
+  // 레거시(구버전) orphan 기록을 첫 사업으로 이관
+  const orphans = (await getAll()).filter(r => !r.projectId);
+  if (orphans.length) {
+    const pid = projects[0].id;
+    for (const r of orphans) { r.projectId = pid; await putRecord(r); }
+  }
+  currentProjectId = getCurrentProjectId();
+  if (!projects.find(p => p.id === currentProjectId)) currentProjectId = projects[0].id;
+  saveCurrentProjectId(currentProjectId);
+  renderProjectSelect(projects);
+  loadMarkers();
+  loadOverlays();
+}
+
+// ==========================================================================
+// ★★ 데이터 접근 계층 (Data Access Layer) — 저장소를 만지는 유일한 통로 ★★
+// --------------------------------------------------------------------------
+// 규칙: 앱의 어떤 코드도 db.transaction()/objectStore() 를 직접 부르지 않는다.
+//       모든 저장/조회는 아래 idbRead/idbWrite → 이름붙은 헬퍼(getAll/putRecord 등)만 거친다.
+//       (2026-07-05 점검: 실데이터 4종 records/projects/features/overlays 는 이 계층만 통함이 확인됨)
+//
+// 이 계층이 중요한 이유(향후 서버 전환 대비, 개발명세 §2.3 참고):
+//   지금은 브라우저 IndexedDB 로컬 저장이지만, 나중에 회사 서버(실시간 공유, 3단계)로 가면
+//   "이 계층 함수들의 내부만" IndexedDB → 서버 API 호출로 바꾸면 되고, 나머지 코드는 그대로 둔다.
+//   → 그러려면 이 통로를 우회하는 직접 접근이 새로 생기지 않도록 유지하는 것이 핵심.
+//
+// 저장소 전체 지형(서버 전환 시 함께 고려할 것):
+//   1) IndexedDB(fieldSurveyDB): 실데이터 4 스토어 — 이 계층이 담당(서버 이전 대상).
+//   2) localStorage 'currentProjectId': 현재 선택된 사업 id(UI 상태). 헬퍼(getCurrentProjectId 등)로 접근.
+//   3) sessionStorage 'fs_auth'/'cadastral_notified': 로그인·안내 세션 플래그(휘발성, 이전 대상 아님).
+//
+// ★ 모든 IndexedDB 헬퍼는 onerror를 갖는다.
+//   (onerror가 없으면 저장/조회 실패 시 onsuccess가 안 불려 Promise가 영원히 pending →
+//    일괄 업로드 루프 등이 그 자리에서 멈춤. 갤24 크롬/삼성인터넷 멈춤 원인 차단)
+// ==========================================================================
+function idbRead(store, op) {
+  return new Promise((res, rej) => {
+    try {
+      const r = op(db.transaction(store, 'readonly').objectStore(store));
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error || new Error(store + ' 조회 실패'));
+    } catch (err) { rej(err); }
+  });
+}
+function idbWrite(store, op) {
+  return new Promise((res, rej) => {
+    try {
+      const os = db.transaction(store, 'readwrite').objectStore(store);
+      const r = op(os);
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error || new Error(store + ' 저장 실패'));
+    } catch (err) { rej(err); }
+  });
+}
+function getAll()            { return idbRead(STORE, os => os.getAll()).then(v => v || []); }
+function putRecord(rec)      { return idbWrite(STORE, os => os.put(rec)); }
+function deleteRecord(id)    { return idbWrite(STORE, os => os.delete(id)); }
+function clearStore(name)    { return idbWrite(name, os => os.clear()); }
+function getAllProjects()    { return idbRead(PROJECTS, os => os.getAll()).then(v => v || []); }
+function putProject(p)       { return idbWrite(PROJECTS, os => os.put(p)); }
+function deleteProjectRec(id){ return idbWrite(PROJECTS, os => os.delete(id)); }
+// ----- 도형(features) -----
+function getAllFeatures() {
+  if (!db.objectStoreNames.contains(FEATURES)) return Promise.resolve([]);
+  return idbRead(FEATURES, os => os.getAll()).then(v => v || []);
+}
+function putFeature(f)       { return idbWrite(FEATURES, os => os.put(f)); }
+function deleteFeature(id)   { return idbWrite(FEATURES, os => os.delete(id)); }
+// ----- 참조 도형 레이어(overlays: DXF/SHP) -----
+function getAllOverlays() {
+  if (!db.objectStoreNames.contains(OVERLAYS)) return Promise.resolve([]);
+  return idbRead(OVERLAYS, os => os.getAll()).then(v => v || []);
+}
+function putOverlay(o)       { return idbWrite(OVERLAYS, os => os.put(o)); }
+function deleteOverlayRec(id){ return idbWrite(OVERLAYS, os => os.delete(id)); }
+// ----- 현재 선택된 사업 id (localStorage, UI 상태) — 매직 문자열을 한 곳으로 모음 -----
+function getCurrentProjectId()   { return localStorage.getItem('currentProjectId'); }
+function saveCurrentProjectId(id){ localStorage.setItem('currentProjectId', id); }
+function clearCurrentProjectId() { localStorage.removeItem('currentProjectId'); }
+
+// ========== 하천선 자동 귀속 (조사 → 가장 가까운 하천선) ==========
+// 핵심 효용: 장거리 하천(수십~100km) 조사에서 자료가 어느 하천 구간에 속하는지
+//           라인 기준으로 묶어 정렬·탐색. records.featureId 로 귀속을 저장.
+//   - 자동: 저장 시 가장 가까운 line feature에 귀속(featureManual=false)
+//   - 수동: 폼에서 특정 하천선/없음 선택 시 featureManual=true → 재계산에서 제외
+
+// 위경도를 점 p 기준 국소 평면(미터)으로 근사 변환 (등거리 직사각 투영)
+function _toXY(q, origin) {
+  const R = 6378137, rad = Math.PI / 180;
+  const cosLat = Math.cos(origin.lat * rad);
+  return { x: (q.lng - origin.lng) * rad * cosLat * R, y: (q.lat - origin.lat) * rad * R };
+}
+// 점 p 에서 선분 a-b 까지 최소거리(m)
+function pointToSegMeters(p, a, b) {
+  const P = { x: 0, y: 0 }, A = _toXY(a, p), B = _toXY(b, p);
+  const dx = B.x - A.x, dy = B.y - A.y, len2 = dx * dx + dy * dy;
+  let t = len2 ? ((P.x - A.x) * dx + (P.y - A.y) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(P.x - (A.x + t * dx), P.y - (A.y + t * dy));
+}
+// 점 → 폴리라인(coords=[[lat,lng],...]) 최소거리(m)
+function pointToLineMeters(lat, lng, coords) {
+  let min = Infinity; const p = { lat, lng };
+  for (let i = 0; i < coords.length - 1; i++) {
+    const d = pointToSegMeters(
+      p, { lat: coords[i][0], lng: coords[i][1] }, { lat: coords[i + 1][0], lng: coords[i + 1][1] });
+    if (d < min) min = d;
+  }
+  return min;
+}
+// 가장 가까운 하천선 + 2순위(교차부 모호성 판단용)
+async function nearestLineFeature(lat, lng, projectId) {
+  const feats = (await getAllFeatures()).filter(
+    f => f.projectId === projectId && f.type === 'line' && Array.isArray(f.coords) && f.coords.length >= 2);
+  let best = null, bestD = Infinity, second = null, secondD = Infinity;
+  for (const f of feats) {
+    const d = pointToLineMeters(lat, lng, f.coords);
+    if (d < bestD) { second = best; secondD = bestD; best = f; bestD = d; }
+    else if (d < secondD) { second = f; secondD = d; }
+  }
+  return { feature: best, dist: bestD, second, secondDist: secondD, count: feats.length };
+}
+// ===== 구역(폴리곤) 포함 판정 (point-in-polygon, ray casting) =====
+function pointInPolygon(lat, lng, coords) {
+  let inside = false;
+  for (let i = 0, j = coords.length - 1; i < coords.length; j = i++) {
+    const yi = coords[i][0], xi = coords[i][1], yj = coords[j][0], xj = coords[j][1];
+    if (((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+// 폴리곤 면적(상대 비교용 — 작은 구역 우선 판정). 단위 무관(위경도 shoelace).
+function polyArea(coords) {
+  let a = 0;
+  for (let i = 0, j = coords.length - 1; i < coords.length; j = i++)
+    a += (coords[j][1] + coords[i][1]) * (coords[j][0] - coords[i][0]);
+  return Math.abs(a / 2);
+}
+// ★ 통합 귀속(28a): 포함하는 구역(폴리곤)이 있으면 우선(가장 작은 구역), 없으면 최근접 선형.
+//   반환 mode='polygon'|'line' — 모호성 경고는 선형(line)에만 적용.
+async function nearestFeature(lat, lng, projectId) {
+  const feats = (await getAllFeatures()).filter(f => f.projectId === projectId && Array.isArray(f.coords));
+  const polys = feats.filter(f => f.type === 'polygon' && f.coords.length >= 3 && pointInPolygon(lat, lng, f.coords));
+  if (polys.length) {
+    polys.sort((a, b) => polyArea(a.coords) - polyArea(b.coords));   // 세부 구역이 광역보다 구체적 → 우선
+    return { feature: polys[0], dist: 0, second: polys[1] || null, secondDist: 0, count: feats.length, mode: 'polygon' };
+  }
+  const near = await nearestLineFeature(lat, lng, projectId);
+  return { ...near, mode: 'line' };
+}
+// ⚠ T자/X자 교차부 모호성: 1·2순위 거리차가 작으면 자동귀속이 불확실 → 사용자 확인 권장 플래그.
+//   (근본 해법은 명세 §10 — 측점·방향 기반 매칭. 현재는 단순 최근접 + 모호성 경고 + 수동 변경.)
+function isAmbiguous(bestD, secondD) {
+  if (!isFinite(secondD)) return false;
+  return (secondD - bestD) < 25 || (bestD > 0 && secondD < bestD * 1.25 && (secondD - bestD) < 60);
+}
+// 자동 귀속 기록(featureManual=false) 일괄 재계산 — 하천선 추가/삭제 후 호출
+async function recomputeAuto(projectId = currentProjectId) {
+  const recs = (await getAll()).filter(r => r.projectId === projectId && !r.featureManual);
+  for (const r of recs) {
+    const la = Number(r.lat), ln = Number(r.lng);
+    if (!isFinite(la) || !isFinite(ln)) continue;
+    const near = await nearestFeature(la, ln, projectId);
+    const newId = near.feature ? near.feature.id : null;
+    const amb = (near.feature && near.mode === 'line') ? isAmbiguous(near.dist, near.secondDist) : false;
+    if (r.featureId !== newId || !!r.featureAmbiguous !== amb) {
+      r.featureId = newId; r.featureAmbiguous = amb;
+      await putRecord(r);
+    }
+  }
+}
+
+// ========== 사업 선택/생성 ==========
+function renderProjectSelect(projects) {
+  const sel = document.getElementById('projectSelect');
+  sel.innerHTML = projects
+    .map(p => `<option value="${p.id}" ${p.id === currentProjectId ? 'selected' : ''}>${p.name}</option>`)
+    .join('');
+}
+function onProjectChange() {
+  currentProjectId = document.getElementById('projectSelect').value;
+  saveCurrentProjectId(currentProjectId);
+  loadMarkers();
+  loadOverlays();
+}
+async function newProject() {
+  const name = prompt('새 사업 이름을 입력하세요');
+  if (!name || !name.trim()) return;
+  const id = 'p' + Date.now();
+  await putProject({ id, name: name.trim(), created: Date.now() });
+  currentProjectId = id;
+  saveCurrentProjectId(id);
+  renderProjectSelect(await getAllProjects());
+  loadMarkers();
+}
+async function renameProject() {
+  const projects = await getAllProjects();
+  const cur = projects.find(p => p.id === currentProjectId);
+  if (!cur) { alert('현재 사업을 찾을 수 없습니다.'); return; }
+  const name = prompt('사업명을 수정하세요', cur.name);
+  if (name === null) return;                       // 취소
+  const trimmed = name.trim();
+  if (!trimmed) { alert('사업명은 비울 수 없습니다.'); return; }
+  if (trimmed === cur.name) return;                // 변경 없음
+  if (projects.some(p => p.id !== cur.id && p.name === trimmed)) {
+    alert(`이미 같은 이름의 사업「${trimmed}」이 있습니다. 다른 이름을 사용하세요.`);
+    return;
+  }
+  await putProject({ ...cur, name: trimmed });
+  renderProjectSelect(await getAllProjects());
+}
+async function deleteProject() {
+  const projects = await getAllProjects();
+  const isLast = projects.length <= 1;
+  const projName = document.getElementById('projectSelect').selectedOptions[0]?.text || '현재 사업';
+  const recs = (await getAll()).filter(r => r.projectId === currentProjectId);
+  const feats = (await getAllFeatures()).filter(f => f.projectId === currentProjectId);
+  // 1단계: 데이터가 모두 사라짐을 알리고, 다른 사업으로 옮길 기회를 안내
+  const has = recs.length || feats.length;
+  const msg1 = has
+    ? `[${projName}] 사업을 삭제하면 이 사업의 조사 ${recs.length}건` +
+      (feats.length ? `·하천선 ${feats.length}개` : '') +
+      `이(가) 모두 함께 삭제됩니다.\n\n` +
+      `⚠ 자료를 남기고 싶다면 [취소]를 누른 뒤,\n` +
+      `목록(📋) → "선택" → "사업 이동/분리"로 다른 사업으로 먼저 옮겨 두세요.\n\n` +
+      `그래도 삭제하시겠습니까?`
+    : `[${projName}] 사업을 삭제하시겠습니까?`;
+  const msg1b = isLast ? msg1 + `\n\n※ 마지막 사업입니다. 삭제하면 최초의 "첫 사업 만들기" 화면으로 돌아갑니다.` : msg1;
+  if (!confirm(msg1b)) return;
+  // 2단계: 최종 확인
+  if (!confirm(`정말로 [${projName}] 사업을 삭제하시겠습니까?\n삭제된 자료는 되돌릴 수 없습니다. (마지막 확인)`)) return;
+  for (const r of recs) await deleteRecord(r.id);
+  for (const f of feats) await deleteFeature(f.id);
+  const ovs = (await getAllOverlays()).filter(o => o.projectId === currentProjectId);
+  for (const o of ovs) await deleteOverlayRec(o.id);
+  await deleteProjectRec(currentProjectId);
+  const remaining = await getAllProjects();
+  if (remaining.length === 0) {
+    // 마지막 사업까지 삭제 → 최초의 닫힌 상태(첫 사업 게이트)로 복귀
+    currentProjectId = null;
+    clearCurrentProjectId();
+    renderProjectSelect([]);
+    await loadMarkers();
+    await loadOverlays();
+    alert(`[${projName}] 사업 삭제 완료.\n모든 사업이 삭제되어 최초 화면으로 돌아갑니다.`);
+    document.getElementById('firstProjOverlay').classList.add('show');
+    setTimeout(() => document.getElementById('firstProjName')?.focus(), 120);
+    return;
+  }
+  currentProjectId = remaining[0].id;
+  saveCurrentProjectId(currentProjectId);
+  renderProjectSelect(remaining);
+  await loadMarkers();
+  await loadOverlays();
+  alert(`[${projName}] 사업 삭제 완료.`);
+}
+
+// ========== ＋사업 메뉴(사업추가/사업합치기) ==========
+function openProjectAddMenu() { document.getElementById('projectAddMenuOverlay').classList.add('show'); }
+function closeProjectAddMenu() { document.getElementById('projectAddMenuOverlay').classList.remove('show'); }
+
+// ----- 사업 합치기 -----
+async function openMergeProjects() {
+  const projs = await getAllProjects();
+  if (projs.length < 2) { alert('합칠 사업이 2개 이상 있어야 합니다.'); return; }
+  const all = await getAll();
+  const body = document.getElementById('mergeProjBody');
+  body.innerHTML = projs.map(p => {
+    const cnt = all.filter(r => r.projectId === p.id).length;
+    return `<label class="ov-row" style="display:flex;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px solid #f0f2f5;cursor:pointer;">
+      <input type="checkbox" class="merge-proj" value="${p.id}" onchange="updateMergeProjCount()" style="width:18px;height:18px;flex-shrink:0;">
+      <span style="flex:1;min-width:0;">${esc(p.name)}</span>
+      <span class="meta" style="margin:0;flex-shrink:0;">${cnt}건</span>
+    </label>`;
+  }).join('');
+  updateMergeProjCount();
+  document.getElementById('mergeProjOverlay').classList.add('show');
+}
+function closeMergeProjects() { document.getElementById('mergeProjOverlay').classList.remove('show'); }
+function mergeProjSelAll(on) {
+  document.querySelectorAll('#mergeProjBody .merge-proj').forEach(c => c.checked = on);
+  updateMergeProjCount();
+}
+function updateMergeProjCount() {
+  const n = document.querySelectorAll('#mergeProjBody .merge-proj:checked').length;
+  document.getElementById('mergeProjCount').textContent = `${n}개 선택`;
+}
+async function mergeProjectsRun() {
+  const ids = [...document.querySelectorAll('#mergeProjBody .merge-proj:checked')].map(c => c.value);
+  if (ids.length < 2) { alert('합칠 사업을 2개 이상 선택하세요.'); return; }
+  const allProjs = await getAllProjects();
+  const srcProjs = allProjs.filter(p => ids.includes(p.id));
+  const idSet = new Set(ids);
+
+  const name = prompt('합쳐진 새 사업의 이름을 입력하세요', srcProjs[0]?.name || '합쳐진 사업');
+  if (name === null) return;
+  const trimmed = name.trim();
+  if (!trimmed) { alert('사업명은 비울 수 없습니다.'); return; }
+  if (allProjs.some(p => !idSet.has(p.id) && p.name === trimmed)) {
+    alert(`이미 같은 이름의 다른 사업「${trimmed}」이 있습니다. 다른 이름을 사용하세요.`);
+    return;
+  }
+
+  // 되돌릴 수 없는 삭제가 실수로 [확인](엔터 등 반사적 클릭)에 걸리지 않도록,
+  // "유지하시겠습니까?"로 물어 안전한 선택(유지)을 [확인]에 배치(2026-07 실무자 의견 반영)
+  const keepOrig = confirm(
+    `${ids.length}개 사업(${srcProjs.map(p => p.name).join(', ')})을 합쳐\n` +
+    `「${trimmed}」 사업을 만듭니다.\n\n` +
+    `원본 사업을 유지하시겠습니까?\n\n` +
+    `[확인] 유지 — 원본 사업도 남지만, 자료가 두 곳에 중복 보관됩니다.\n` +
+    `[취소] 삭제 — 자료는 새 사업으로 이동만 됩니다.`
+  );
+  const delOrig = !keepOrig;
+
+  const newId = 'p' + Date.now() + Math.random().toString(36).slice(2, 6);
+  await putProject({ id: newId, name: trimmed, created: Date.now() });
+
+  // 하천선 등 도형 — 같은 계보(originId/id, featureLineageKey)면 중복 없이 하나로 합침(copyFeaturesToProject와 동일 원칙)
+  const allFeats = await getAllFeatures();
+  const srcFeats = allFeats.filter(f => idSet.has(f.projectId));
+  const lineageMap = new Map();    // lineageKey → target feature id
+  const featIdRemap = new Map();   // (원본 사업 내) 원래 feature id → target feature id
+  for (const f of srcFeats) {
+    const key = featureLineageKey(f);
+    if (lineageMap.has(key)) {
+      featIdRemap.set(f.id, lineageMap.get(key));
+      if (delOrig) await deleteFeature(f.id);
+      continue;
+    }
+    if (delOrig) {
+      f.projectId = newId;
+      await putFeature(f);
+      lineageMap.set(key, f.id);
+      featIdRemap.set(f.id, f.id);
+    } else {
+      const nid = 'f' + Date.now() + Math.floor(Math.random() * 1000);
+      await putFeature({ ...f, id: nid, projectId: newId, originId: key, created: Date.now() });
+      lineageMap.set(key, nid);
+      featIdRemap.set(f.id, nid);
+    }
+  }
+
+  const allRecs = await getAll();
+  const srcRecs = allRecs.filter(r => idSet.has(r.projectId));
+  for (const r of srcRecs) {
+    if (delOrig) {
+      r.projectId = newId;
+      if (r.featureId && featIdRemap.has(r.featureId)) r.featureId = featIdRemap.get(r.featureId);
+      await putRecord(r);
+    } else {
+      const nr = { ...r, id: r.id + '_m' + Date.now().toString(36) + Math.floor(Math.random() * 1000), projectId: newId };
+      if (nr.featureId && featIdRemap.has(nr.featureId)) nr.featureId = featIdRemap.get(nr.featureId);
+      await putRecord(nr);
+    }
+  }
+
+  // 참조레이어(DXF/SHP/KML) — 여러 사업에 같은 파일이 각각 올라가 있었을 수 있으므로
+  // importJSON과 동일한 overlayIsDup(이름+종류+좌표 지문)으로 병합 중 중복을 걸러냄(§12.2[13] 보완)
+  const allOvs = await getAllOverlays();
+  const srcOvs = allOvs.filter(o => idSet.has(o.projectId));
+  const mergedOvs = [];   // 새 사업에 이미 반영된 레이어(중복판단 기준)
+  let skippedOvCount = 0;
+  for (const o of srcOvs) {
+    const dup = mergedOvs.find(mo => overlayIsDup(mo, o));
+    if (dup) {
+      skippedOvCount++;
+      if (delOrig) await deleteOverlayRec(o.id);
+      continue;
+    }
+    if (delOrig) { o.projectId = newId; await putOverlay(o); mergedOvs.push(o); }
+    else {
+      const no = { ...o, id: 'ov' + Date.now() + Math.floor(Math.random() * 1000), projectId: newId };
+      await putOverlay(no); mergedOvs.push(no);
+    }
+  }
+
+  if (delOrig) { for (const pid of ids) await deleteProjectRec(pid); }
+
+  currentProjectId = newId;
+  saveCurrentProjectId(newId);
+  renderProjectSelect(await getAllProjects());
+  await loadMarkers();
+  await loadOverlays();
+  closeMergeProjects();
+  alert(`사업 합치기 완료 — 「${trimmed}」에 조사 ${srcRecs.length}건` +
+    (srcFeats.length ? `, 선형 ${lineageMap.size}개(중복 제외)` : '') +
+    (srcOvs.length ? `, 참조레이어 ${mergedOvs.length}개` + (skippedOvCount ? `(파일명·좌표 동일 ${skippedOvCount}개는 중복 제외)` : '') : '') + ` 합쳐졌습니다.` +
+    (delOrig ? '' : ' (원본 사업은 유지되어 자료가 두 곳에 중복 보관됩니다.)'));
+}
+
 // ========== 마커 표시 ==========
 let recordMarkers = [];
 let groupData = {};              // gid → {items:[{r,la,ln}], marker} (겹친 지점 목록 팝업용)
