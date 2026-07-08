@@ -941,6 +941,12 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
+// ========== 배포 config (배포처마다 다른 값은 이 블록에만) ==========
+// GitHub Pages 배포용. 회사서버(sitesurveyjay.kecc.co.kr) 배포는 index_kecc_server.html에서
+// 이 블록의 VWORLD_KEY/DEPLOY_DOMAIN_HINT만 교체한 사본을 별도 관리.
+const VWORLD_KEY = 'BBCD79DD-0859-3B41-A7C9-34898DA8FC43';
+const DEPLOY_DOMAIN_HINT = 'GitHub Pages 도메인';
+
 // ========== 공통 상수 ==========
 const BUILD = '2026-07-06d (조사경로 트래킹 — 위치권한 거부 시 즉시 안내, GPS신호 장기미수신 경고)';
 console.log('현장조사 build:', BUILD);
@@ -954,7 +960,6 @@ document.getElementById('bulkKind').innerHTML    = kindOptions('하천');
 document.getElementById('kindChangeSelect').innerHTML = kindOptions('하천');
 
 // ========== 지도 초기화 ==========
-const VWORLD_KEY = 'BBCD79DD-0859-3B41-A7C9-34898DA8FC43';
 const vworldUrl = (layer, ext) =>
   `https://api.vworld.kr/req/wmts/1.0.0/${VWORLD_KEY}/${layer}/{z}/{y}/{x}.${ext}`;
 
@@ -1034,7 +1039,6 @@ function onBaseChanged(sat) {
   applyMarkerStyles();
   applyCadastralStyle();
   applyRefShapeStyle();
-  applyLpParcelStyle();
   loadFeatures();            // 선형/구역 위성 흰 글로우(halo) 재적용
   loadOverlays();            // SHP 배경적응 색 재적용
   if (typeof dirFanRecord !== 'undefined' && dirFanRecord) showDirFan(dirFanRecord);   // 촬영방향 부채꼴도 배경적응 색 재적용
@@ -1044,9 +1048,6 @@ function onBaseChanged(sat) {
 map.createPane('refShapes');
 map.getPane('refShapes').style.zIndex = 450;   // 마커(600)보다 아래, 타일(200)보다 위
 const refRenderer = L.svg({ pane: 'refShapes' });
-// "여기 주소보기" 필지 테두리 강조 전용 pane — refShapes보다 위, 마커보다 아래
-map.createPane('parcelHi');
-map.getPane('parcelHi').style.zIndex = 455;
 // DXF 텍스트(측점) 라벨 전용 pane — refShapes(455)보다 위, 사진마커(600)보다 아래.
 // 별도 pane으로 두어 위성 CSS필터(밝기보정) 영향을 안 받고, 줌 임계값으로 저줌 클러터 억제.
 map.createPane('dxfLabels');
@@ -1156,20 +1157,6 @@ async function vworldReverseGeocode(lat, lng) {
   return null;
 }
 
-// 좌표→그 지점이 속한 필지 1개의 경계(GeoJSON geometry)만 조회(§3.1 지적 WMS와 별개인 VWorld 데이터API·연속지적도)
-// "여기 주소보기"에서 주소와 함께 그 필지 테두리만 살짝 강조하기 위함. ⚠ 지적도와 동일하게 참고용(§3.1 안내 재사용).
-async function vworldParcelGeom(lat, lng) {
-  const url = `https://api.vworld.kr/req/data?service=data&request=GetFeature&data=LP_PA_CBND_BUBUN`
-    + `&geomFilter=POINT(${lng} ${lat})&geometry=true&attribute=false&crs=EPSG:4326`
-    + `&format=json&errorformat=json&size=1`
-    + `&key=${VWORLD_KEY}&domain=${location.hostname}`;
-  const data = await vworldJsonp(url);
-  const fc = data && data.response && data.response.status === 'OK' &&
-    data.response.result && data.response.result.featureCollection;
-  const feat = fc && fc.features && fc.features[0];
-  return (feat && feat.geometry) || null;
-}
-
 // 행정구역(시도/시군구/읍면동/리) 자체를 하나의 결과로 반환 — road/parcel 검색은 "간전면" 같은 구역명 자체를
 // 결과로 주지 않고(건물주소만 나옴) 구역명이 포함된 건물주소 수천 건을 반환하므로 별도 API(type=district) 필요.
 // L1~L4를 병렬 조회해 병합(레벨별 상세도 다름 → 줌 레벨도 레벨별로 다르게).
@@ -1256,7 +1243,7 @@ vBase.on('tileerror', () => {
   if (vworldFailed) return;
   vworldFailed = true;
   if (map.hasLayer(vBase)) { map.removeLayer(vBase); osm.addTo(map); }
-  console.warn('VWorld 타일 로드 실패 → OSM 임시 대체. GitHub Pages 도메인 등록 후 정상 동작합니다.');
+  console.warn(`VWorld 타일 로드 실패 → OSM 임시 대체. ${DEPLOY_DOMAIN_HINT} 등록 후 정상 동작합니다.`);
 });
 
 // 배경에 따라 마커 가시색 결정 — divIcon(DOM) 기반으로 Canvas/SVG 렌더러 의존 제거
@@ -1299,33 +1286,6 @@ function applyRefShapeStyle() {
   const p = map.getPane('refShapes');
   if (p) p.style.filter = isSatellite
     ? 'drop-shadow(0 0 1px rgba(0,0,0,0.95)) drop-shadow(0 0 1px rgba(0,0,0,0.95))' : '';
-}
-
-// "여기 주소보기" 필지 테두리 강조 — 채우기 없이 선만, 배경(일반/위성)에 따라 잘 보이는 색으로 전환
-let lpParcelLayer = null;
-function parcelHiStyle() {
-  return isSatellite
-    ? { color: '#ffee33', weight: 3, opacity: 0.95, fillOpacity: 0 }
-    : { color: '#e91e63', weight: 3, opacity: 0.9, fillOpacity: 0 };
-}
-function applyLpParcelStyle() {
-  if (lpParcelLayer) lpParcelLayer.setStyle(parcelHiStyle());
-  const p = map.getPane('parcelHi');
-  if (p) p.style.filter = isSatellite
-    ? 'drop-shadow(0 0 1.5px rgba(0,0,0,0.9)) drop-shadow(0 0 1.5px rgba(0,0,0,0.9))' : '';
-}
-function clearLpParcelHighlight() {
-  if (lpParcelLayer) { map.removeLayer(lpParcelLayer); lpParcelLayer = null; }
-}
-// 여러 번 연달아 "여기 주소보기"를 눌러도, 마지막 호출한 좌표의 결과만 반영되도록 세대(gen) 비교로 경합 방지.
-let lpParcelReqGen = 0;
-function showLpParcelHighlight(lat, lng) {
-  clearLpParcelHighlight();
-  const gen = ++lpParcelReqGen;
-  vworldParcelGeom(lat, lng).then(geom => {
-    if (!geom || gen !== lpParcelReqGen) return;
-    lpParcelLayer = L.geoJSON(geom, { pane: 'parcelHi', interactive: false, style: parcelHiStyle() }).addTo(map);
-  });
 }
 // (배경 전환 로직은 selectBase()→onBaseChanged()로 이동 — 위 레이어 통합 버튼 참조)
 
@@ -2170,14 +2130,11 @@ function lpShowAddress() {
     .setLatLng(latlng)
     .setContent('<div class="addr-popup-body">주소 조회 중…</div>')
     .openOn(map);
-  popup.on('remove', clearLpParcelHighlight);   // 팝업 닫으면 필지 테두리도 함께 지움
-  showLpParcelHighlight(latlng.lat, latlng.lng);
   vworldReverseGeocode(latlng.lat, latlng.lng).then(addr => {
     lpLastAddr = addr;
     const body = addr
       ? `<div class="addr-popup-body"><div class="addr-popup-text">${esc(addr)}</div>` +
-        `<button class="addr-copy-btn" onclick="copyLpAddr(this)">📋 주소 복사</button>` +
-        `<div class="addr-src-note">필지 경계: VWorld 지적(참고용)</div></div>`
+        `<button class="addr-copy-btn" onclick="copyLpAddr(this)">📋 주소 복사</button></div>`
       : `<div class="addr-popup-body">주소를 찾을 수 없습니다.</div>`;
     popup.setContent(body);
   });
